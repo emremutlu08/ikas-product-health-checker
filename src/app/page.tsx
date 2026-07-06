@@ -79,7 +79,7 @@ export default async function Home({
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-lg font-black text-emerald-300">P</div>
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">ikas yönetim uygulaması ilk sürüm</p>
-              <h1 className="text-3xl font-bold tracking-tight text-slate-950">Ürün Veri Sağlığı Kontrolü</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-950">Ürün Sağlığı Asistanı</h1>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

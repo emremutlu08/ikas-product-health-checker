@@ -1,10 +1,10 @@
-# ikas App Dev Workflow — Product Data Health Checker
+# ikas App Dev Workflow — Ürün Sağlığı Asistanı
 
 This is the local workflow we validated while building the first ikas admin app. Keep it in the repo so it can later be exposed through a local MCP server if needed.
 
 ## Validated milestone
 
-`Product Data Health Checker` works with live ikas `listProduct` data in read-only mode.
+`Ürün Sağlığı Asistanı` works with live ikas `listProduct` data in read-only mode.
 
 Validated store/app:
 

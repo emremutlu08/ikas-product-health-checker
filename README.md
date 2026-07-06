@@ -1,4 +1,4 @@
-# ikas Product Data Health Checker
+# ikas Ürün Sağlığı Asistanı
 
 Read-only ikas admin app MVP for validating merchant interest before building a paid Low Stock Alert.
 
@@ -109,7 +109,7 @@ Known dev-only console noise:
 
 ## Current milestone
 
-`Product Data Health Checker` now works with live ikas `listProduct` data in read-only mode. Low Stock Alert remains a Phase 2 paid validation hook.
+`Ürün Sağlığı Asistanı` now works with live ikas `listProduct` data in read-only mode. Low Stock Alert remains a Phase 2 paid validation hook.
 
 
 ## Temporary app icon

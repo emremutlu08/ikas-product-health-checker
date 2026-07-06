@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ikas Ürün Veri Sağlığı Kontrolü",
+  title: "ikas Ürün Sağlığı Asistanı",
   description: "ikas ürün verilerini yalnızca okuma modunda kontrol eden sağlık raporu MVP’si.",
 };
 
