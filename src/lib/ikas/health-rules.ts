@@ -27,13 +27,13 @@ const ISSUE_CODES: HealthIssueCode[] = [
 
 
 const RULE_LABELS: Record<MistakeRuleCode, string> = {
-  incorrect_price: "Incorrect Price",
-  out_of_stock: "Out Of Stock",
-  missing_images: "Missing Images",
-  missing_sku: "Missing SKU",
-  same_sku: "Same SKU",
-  duplicate_title: "Duplicate Title",
-  weird_description: "Weird Description",
+  incorrect_price: "Hatalı Fiyat",
+  out_of_stock: "Stokta Yok",
+  missing_images: "Görsel Eksik",
+  missing_sku: "SKU Eksik",
+  same_sku: "Aynı SKU",
+  duplicate_title: "Tekrarlanan Başlık",
+  weird_description: "Sorunlu Açıklama",
 };
 
 const ISSUE_TO_RULE: Partial<Record<HealthIssueCode, MistakeRuleCode>> = {
@@ -261,7 +261,7 @@ export function buildHealthReport(products: IkasProduct[], now = new Date(), opt
       ...imageData,
       updatedAt: issue.productUpdatedAt,
       mistakes: [],
-      actionLabel: "Review",
+      actionLabel: "İncele",
     };
     if (!current.mistakes.includes(RULE_LABELS[rule])) current.mistakes.push(RULE_LABELS[rule]);
     grouped.set(issue.productId, current);

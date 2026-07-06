@@ -65,9 +65,9 @@ export default async function Home({
   if (params.authorizedAppId) launchQuery.set("authorizedAppId", params.authorizedAppId);
   launchQuery.set("oauth", "skip");
   const baseDashboardHref = `/?${launchQuery.toString()}`;
-  const scanStatus = report.scanStatus === "success" ? "Success" : "Queued";
-  const lowStockIntentHref = `mailto:mutluemre93@gmail.com?subject=${encodeURIComponent("Low Stock Alert ilgimi çekti")}&body=${encodeURIComponent(
-    `Store: ${effectiveStoreName ?? "unknown"}\nCurrent low stock risks: ${report.lowStockRiskCount}\nAuthorized app: ${params.authorizedAppId ?? "unknown"}`,
+  const scanStatus = report.scanStatus === "success" ? "Başarılı" : "Sırada";
+  const lowStockIntentHref = `mailto:mutluemre93@gmail.com?subject=${encodeURIComponent("Stok uyarısı ilgimi çekti")}&body=${encodeURIComponent(
+    `Mağaza: ${effectiveStoreName ?? "bilinmiyor"}\nMevcut stok riskleri: ${report.lowStockRiskCount}\nYetkili uygulama: ${params.authorizedAppId ?? "bilinmiyor"}`,
   )}`;
 
   return (
@@ -78,23 +78,23 @@ export default async function Home({
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-lg font-black text-emerald-300">P</div>
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">ikas admin app MVP</p>
-              <h1 className="text-3xl font-bold tracking-tight text-slate-950">Product Data Health Checker</h1>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">ikas yönetim uygulaması ilk sürüm</p>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-950">Ürün Veri Sağlığı Kontrolü</h1>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
-              Live ikas GraphQL
+              Canlı ikas verisi
             </span>
-            {effectiveStoreName ? <span className="rounded-full bg-white px-3 py-1 text-sm text-slate-600 ring-1 ring-slate-200">Store: {effectiveStoreName}</span> : null}
+            {effectiveStoreName ? <span className="rounded-full bg-white px-3 py-1 text-sm text-slate-600 ring-1 ring-slate-200">Mağaza: {effectiveStoreName}</span> : null}
           </div>
         </header>
 
         <section className="rounded-3xl bg-blue-50 px-6 py-5 ring-1 ring-blue-100 md:flex md:items-center md:justify-between">
           <div>
-            <h2 className="text-xl font-bold text-slate-700">Find product data mistakes before they cost sales.</h2>
-            <p className="mt-1 text-slate-600">SKU, barcode, price, image, duplicate title, duplicate SKU and stock rules are checked in read-only mode.</p>
-            <a href="#low-stock-cta" className="mt-3 inline-flex text-sm font-bold text-blue-600">Low Stock Alert interest</a>
+            <h2 className="text-xl font-bold text-slate-700">Satışa mal olmadan ürün veri hatalarını bulun.</h2>
+            <p className="mt-1 text-slate-600">SKU, barkod, fiyat, görsel, tekrarlanan başlık, tekrarlanan SKU ve stok kuralları yalnızca okuma modunda kontrol edilir.</p>
+            <a href="#low-stock-cta" className="mt-3 inline-flex text-sm font-bold text-blue-600">Stok uyarısı ilgimi çekti</a>
           </div>
           <div className="mt-4 flex text-5xl text-amber-300 md:mt-0" aria-hidden>
             ☆☆☆☆☆
@@ -103,21 +103,21 @@ export default async function Home({
 
         <section className="rounded-3xl bg-white p-7 shadow-sm ring-1 ring-slate-200">
           <div className="grid gap-6 lg:grid-cols-2">
-            <SummaryItem icon="⬢" iconClass="bg-orange-50 text-orange-500" title="Total product(variants) in store" value={`${report.productCount} (${report.variantCount})`} />
-            <SummaryItem icon="!" iconClass="bg-emerald-50 text-emerald-600" title="Total affected products" value={report.affectedProductCount} />
-            <SummaryItem icon="▣" iconClass="bg-blue-50 text-blue-600" title={`Last scanned (${formatDate(report.generatedAt)})`} value={scanStatus} />
-            <SummaryItem icon="✓" iconClass="bg-slate-100 text-slate-700" title="Health score" value={`${report.score}/100`} />
+            <SummaryItem icon="⬢" iconClass="bg-orange-50 text-orange-500" title="Mağazadaki toplam ürün/varyant" value={`${report.productCount} (${report.variantCount})`} />
+            <SummaryItem icon="!" iconClass="bg-emerald-50 text-emerald-600" title="Sorunlu ürün sayısı" value={report.affectedProductCount} />
+            <SummaryItem icon="▣" iconClass="bg-blue-50 text-blue-600" title={`Son tarama (${formatDate(report.generatedAt)})`} value={scanStatus} />
+            <SummaryItem icon="✓" iconClass="bg-slate-100 text-slate-700" title="Sağlık skoru" value={`${report.score}/100`} />
           </div>
         </section>
 
         <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-slate-950">Rules that watch over your store</h2>
-              <p className="mt-1 text-sm text-slate-500">Click a rule to filter affected products. All checks are read-only.</p>
+              <h2 className="text-2xl font-bold text-slate-950">Mağazanızı kontrol eden kurallar</h2>
+              <p className="mt-1 text-sm text-slate-500">Etkilenen ürünleri filtrelemek için bir kurala tıklayın. Tüm kontroller yalnızca okuma modundadır.</p>
             </div>
             <a className="rounded-xl bg-orange-500 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-600" href={baseDashboardHref}>
-              Apply Filter
+              Filtreyi temizle
             </a>
           </div>
 
@@ -149,13 +149,13 @@ export default async function Home({
         <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-slate-950">Display published products only with rules selected above</h2>
+              <h2 className="text-2xl font-bold text-slate-950">Yukarıdaki kurallara göre etkilenen ürünler</h2>
               <p className="mt-1 text-sm text-slate-500">
-                {selectedRuleLabel ? `${selectedRuleLabel} filtresi açık.` : "Tüm seçili rule sonuçları gösteriliyor."}
+                {selectedRuleLabel ? `${selectedRuleLabel} filtresi açık.` : "Tüm seçili kural sonuçları gösteriliyor."}
               </p>
             </div>
             <a download="ikas-product-health-report.csv" href={csvHref} className="rounded-xl bg-orange-500 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-600">
-              Download CSV
+              CSV indir
             </a>
           </div>
 
@@ -163,11 +163,11 @@ export default async function Home({
             <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-4">Image</th>
-                  <th className="px-4 py-4">Title</th>
-                  <th className="px-4 py-4">Errors/Mistakes</th>
-                  <th className="px-4 py-4">Updated At</th>
-                  <th className="px-4 py-4">Action</th>
+                  <th className="px-4 py-4">Görsel</th>
+                  <th className="px-4 py-4">Ürün adı</th>
+                  <th className="px-4 py-4">Hatalar/Eksikler</th>
+                  <th className="px-4 py-4">Güncellenme tarihi</th>
+                  <th className="px-4 py-4">İşlem</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
@@ -189,14 +189,14 @@ export default async function Home({
                       </td>
                       <td className="px-4 py-4 text-slate-700">{formatDate(row.updatedAt)}</td>
                       <td className="px-4 py-4">
-                        <a className="font-semibold text-violet-600 hover:text-violet-800" href={effectiveStoreName ? `https://${effectiveStoreName}.myikas.com/admin/product/edit/${row.productId}` : `#${row.productId}`} target="_blank" rel="noreferrer">Review</a>
+                        <a className="font-semibold text-violet-600 hover:text-violet-800" href={effectiveStoreName ? `https://${effectiveStoreName}.myikas.com/admin/product/edit/${row.productId}` : `#${row.productId}`} target="_blank" rel="noreferrer">İncele</a>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
                     <td colSpan={5} className="px-6 py-10 text-center text-lg font-semibold text-slate-700">
-                      Currently, there are no products matching this rule. Try updating or select a different rule.
+                      Bu kurala uyan ürün yok. Farklı bir kural seçin veya ürünleri güncelleyin.
                     </td>
                   </tr>
                 )}
@@ -208,14 +208,14 @@ export default async function Home({
         <section id="low-stock-cta" className="rounded-3xl bg-slate-950 p-7 text-white shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-300">Paid MVP hook</p>
-              <h2 className="mt-2 text-2xl font-bold">{report.lowStockRiskCount} out-of-stock risk found</h2>
+              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-300">Ücretli MVP sinyali</p>
+              <h2 className="mt-2 text-2xl font-bold">{report.lowStockRiskCount} stok riski bulundu</h2>
               <p className="mt-2 max-w-3xl text-slate-300">
-                Next paid slice: daily low-stock summary, threshold-based alerts, and email/Slack notification. No stock or product mutation in V1.
+                Sonraki ücretli faz: günlük düşük stok özeti, eşik bazlı uyarılar ve e-posta/Slack bildirimi. V1’de stok veya ürün güncellemesi yapılmaz.
               </p>
             </div>
             <a className="rounded-full bg-white px-5 py-3 text-center text-sm font-bold text-slate-950 transition hover:bg-emerald-100" href={lowStockIntentHref}>
-              I’m interested
+              İlgimi çekti
             </a>
           </div>
         </section>

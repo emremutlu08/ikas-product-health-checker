@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ikas Product Data Health Checker",
-  description: "Read-only ikas product data health report MVP.",
+  title: "ikas Ürün Veri Sağlığı Kontrolü",
+  description: "ikas ürün verilerini yalnızca okuma modunda kontrol eden sağlık raporu MVP’si.",
 };
 
 export default function RootLayout({

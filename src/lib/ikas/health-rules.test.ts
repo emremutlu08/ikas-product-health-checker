@@ -39,7 +39,7 @@ describe("buildHealthReport", () => {
     expect(report.ruleSummaries.find((rule) => rule.code === "incorrect_price")?.count).toBe(1);
     expect(report.ruleSummaries.find((rule) => rule.code === "out_of_stock")?.count).toBe(1);
     expect(report.ruleSummaries.find((rule) => rule.code === "same_sku")?.count).toBe(2);
-    expect(report.productRows.some((row) => row.productName === "Silver Ring" && row.mistakes.includes("Incorrect Price"))).toBe(true);
+    expect(report.productRows.some((row) => row.productName === "Silver Ring" && row.mistakes.includes("Hatalı Fiyat"))).toBe(true);
   });
 });
 
