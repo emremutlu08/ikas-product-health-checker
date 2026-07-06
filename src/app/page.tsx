@@ -32,6 +32,7 @@ export default async function Home({
   const params = (await searchParams) ?? {};
   const session = await getSession().catch(() => undefined);
   const storedToken = await getIkasToken(params.authorizedAppId);
+  const effectiveStoreName = params.storeName ?? storedToken?.storeName ?? session?.storeName;
 
   if (!storedToken?.accessToken && params.authorizedAppId && params.storeName && params.oauth !== "skip") {
     redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
@@ -61,13 +62,13 @@ export default async function Home({
     ? report.productRows.filter((row) => row.mistakes.includes(selectedRuleLabel))
     : report.productRows;
   const launchQuery = new URLSearchParams();
-  if (params.storeName) launchQuery.set("storeName", params.storeName);
+  if (effectiveStoreName) launchQuery.set("storeName", effectiveStoreName);
   if (params.authorizedAppId) launchQuery.set("authorizedAppId", params.authorizedAppId);
   launchQuery.set("oauth", "skip");
   const baseDashboardHref = `/?${launchQuery.toString()}`;
   const scanStatus = report.scanStatus === "success" ? "Success" : "Queued";
   const lowStockIntentHref = `mailto:mutluemre93@gmail.com?subject=${encodeURIComponent("Low Stock Alert ilgimi çekti")}&body=${encodeURIComponent(
-    `Store: ${params.storeName ?? "unknown"}\nCurrent low stock risks: ${report.lowStockRiskCount}\nAuthorized app: ${params.authorizedAppId ?? "unknown"}`,
+    `Store: ${effectiveStoreName ?? "unknown"}\nCurrent low stock risks: ${report.lowStockRiskCount}\nAuthorized app: ${params.authorizedAppId ?? "unknown"}`,
   )}`;
 
   return (
@@ -86,7 +87,7 @@ export default async function Home({
             <span className={`rounded-full px-3 py-1 text-sm font-semibold ring-1 ${isLive ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
               {isLive ? "Live ikas GraphQL" : "Mock fallback"}
             </span>
-            {params.storeName ? <span className="rounded-full bg-white px-3 py-1 text-sm text-slate-600 ring-1 ring-slate-200">Store: {params.storeName}</span> : null}
+            {effectiveStoreName ? <span className="rounded-full bg-white px-3 py-1 text-sm text-slate-600 ring-1 ring-slate-200">Store: {effectiveStoreName}</span> : null}
           </div>
         </header>
 
@@ -189,7 +190,7 @@ export default async function Home({
                       </td>
                       <td className="px-4 py-4 text-slate-700">{formatDate(row.updatedAt)}</td>
                       <td className="px-4 py-4">
-                        <a className="font-semibold text-violet-600 hover:text-violet-800" href={params.storeName ? `https://${params.storeName}.myikas.com/admin/product/edit/${row.productId}` : `#${row.productId}`} target="_blank" rel="noreferrer">Review</a>
+                        <a className="font-semibold text-violet-600 hover:text-violet-800" href={effectiveStoreName ? `https://${effectiveStoreName}.myikas.com/admin/product/edit/${row.productId}` : `#${row.productId}`} target="_blank" rel="noreferrer">Review</a>
                       </td>
                     </tr>
                   ))

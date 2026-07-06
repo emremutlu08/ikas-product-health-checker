@@ -79,7 +79,13 @@ export async function GET(request: NextRequest) {
     session.expiresAt = Date.now() + tokenResponse.data.expires_in * 1000;
     await session.save();
 
-    return NextResponse.redirect(`${getRequestBaseUrl(request)}/?source=ikas`);
+    const redirectUrl = new URL(getRequestBaseUrl(request));
+    redirectUrl.searchParams.set("source", "ikas");
+    if (storeName) redirectUrl.searchParams.set("storeName", storeName);
+    if (authorizedAppId) redirectUrl.searchParams.set("authorizedAppId", authorizedAppId);
+    redirectUrl.searchParams.set("oauth", "skip");
+
+    return NextResponse.redirect(redirectUrl);
   } catch (error) {
     console.error("ikas OAuth callback error", error);
     return NextResponse.redirect(`${getRequestBaseUrl(request)}/authorize-store?status=fail`);
