@@ -40,3 +40,25 @@
 ## No mutation rule
 
 Do not call `createProduct`, `updateProduct`, `saveVariantStocks`, `updateVariantPrices`, or any order/customer mutation in the first app.
+
+
+## Adapter/API slice
+
+The UI now reads through `getProductHealthReport()` instead of importing sample data directly.
+
+- `src/lib/ikas/product-adapter.ts`
+  - `IkasProductAdapter`
+  - `MockIkasProductAdapter`
+  - `HttpIkasProductAdapter`
+- `src/app/api/report/route.ts` returns JSON report.
+- `src/app/api/report.csv/route.ts` returns CSV.
+
+Default mode is mock. Live mode is intentionally gated by env vars:
+
+```bash
+IKAS_PRODUCT_ADAPTER=http
+IKAS_GRAPHQL_ENDPOINT=<real endpoint>
+IKAS_ADMIN_API_TOKEN=<token>
+```
+
+Do not enable live mode until a test store/OAuth token is available.

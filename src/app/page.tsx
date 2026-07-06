@@ -1,9 +1,4 @@
-import { issuesToCsv } from "@/lib/ikas/csv";
-import { buildHealthReport } from "@/lib/ikas/health-rules";
-import { sampleProducts } from "@/lib/ikas/sample-products";
-
-const report = buildHealthReport(sampleProducts);
-const csvHref = `data:text/csv;charset=utf-8,${encodeURIComponent(issuesToCsv(report.issues))}`;
+import { getProductHealthReport } from "@/lib/ikas/report-service";
 
 const issueLabels: Record<string, string> = {
   missing_sku: "SKU eksik",
@@ -25,7 +20,8 @@ function severityClass(severity: string) {
   return "bg-slate-50 text-slate-700 ring-slate-200";
 }
 
-export default function Home() {
+export default async function Home() {
+  const { report, source } = await getProductHealthReport();
   const topIssueCounts = Object.entries(report.issueCountsByCode).filter(([, count]) => count > 0);
 
   return (
@@ -40,11 +36,12 @@ export default function Home() {
                 Ürün kataloğundaki SKU, barkod, görsel, açıklama, kategori, fiyat ve stok risklerini read-only tarar. V1 hedefi:
                 merchant’a ücretsiz değer gösterip Low Stock Alert için paid intent toplamak.
               </p>
+              <p className="mt-3 inline-flex rounded-full bg-white/10 px-3 py-1 text-sm text-slate-300 ring-1 ring-white/10">Data source: {source}</p>
             </div>
             <div className="flex gap-3">
               <a
                 download="ikas-product-health-report.csv"
-                href={csvHref}
+                href="/api/report.csv"
                 className="rounded-full bg-emerald-400 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-300"
               >
                 CSV indir
@@ -83,7 +80,7 @@ export default function Home() {
           <div className="overflow-hidden rounded-3xl border border-white/10 bg-white text-slate-950">
             <div className="border-b border-slate-200 px-6 py-5">
               <h2 className="text-xl font-semibold">Issue table</h2>
-              <p className="mt-1 text-sm text-slate-500">Mock ikas dataset ile çalışan ilk read-only rapor ekranı.</p>
+              <p className="mt-1 text-sm text-slate-500">{source === "mock" ? "Mock ikas dataset ile çalışan ilk read-only rapor ekranı." : "Canlı ikas GraphQL verisiyle üretilen read-only rapor."}</p>
             </div>
             <div className="max-h-[520px] overflow-auto">
               <table className="w-full min-w-[820px] text-left text-sm">
