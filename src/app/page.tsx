@@ -1,4 +1,6 @@
 import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
+import { getSession } from "@/lib/session";
+import { redirect } from "next/navigation";
 import { getProductHealthReport } from "@/lib/ikas/report-service";
 
 const issueLabels: Record<string, string> = {
@@ -21,7 +23,14 @@ function severityClass(severity: string) {
   return "bg-slate-50 text-slate-700 ring-slate-200";
 }
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams?: Promise<{ storeName?: string; oauth?: string }> }) {
+  const params = (await searchParams) ?? {};
+  const session = await getSession().catch(() => undefined);
+
+  if (!session?.accessToken && params.storeName && params.oauth !== "skip") {
+    redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
+  }
+
   const { report, source } = await getProductHealthReport();
   const topIssueCounts = Object.entries(report.issueCountsByCode).filter(([, count]) => count > 0);
 
@@ -38,7 +47,7 @@ export default async function Home() {
                 Ürün kataloğundaki SKU, barkod, görsel, açıklama, kategori, fiyat ve stok risklerini read-only tarar. V1 hedefi:
                 merchant’a ücretsiz değer gösterip Low Stock Alert için paid intent toplamak.
               </p>
-              <p className="mt-3 inline-flex rounded-full bg-white/10 px-3 py-1 text-sm text-slate-300 ring-1 ring-white/10">Data source: {source}</p>
+              <p className="mt-3 inline-flex rounded-full bg-white/10 px-3 py-1 text-sm text-slate-300 ring-1 ring-white/10">Data source: {source}{params.storeName ? ` · store: ${params.storeName}` : ""}</p>
             </div>
             <div className="flex gap-3">
               <a
