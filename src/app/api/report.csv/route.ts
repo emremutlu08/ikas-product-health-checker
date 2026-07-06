@@ -2,9 +2,11 @@ import { getProductHealthReportCsv } from "@/lib/ikas/report-service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const csv = await getProductHealthReportCsv();
+    const url = new URL(request.url);
+    const authorizedAppId = url.searchParams.get("authorizedAppId");
+    const csv = await getProductHealthReportCsv(authorizedAppId);
     return new Response(csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",

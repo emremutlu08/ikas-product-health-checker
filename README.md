@@ -50,7 +50,7 @@ pnpm dev
 - Payment activation
 - Email alerts
 - Low Stock Alert automation
-- Real OAuth/install flow until test-store credentials are available
+- Product/stock/payment mutations
 
 
 ## Adapter/API slice
@@ -73,3 +73,40 @@ IKAS_ADMIN_API_TOKEN=<token>
 ```
 
 Do not enable live mode until a test store/OAuth token is available.
+
+
+## Live ikas validation
+
+Live validation has passed on the development store `dev-emremutlu`.
+
+Working flow:
+
+```bash
+npx ikas app dev
+```
+
+Then open the app-store launch URL printed by the CLI. The app receives `storeName` and `authorizedAppId`, runs OAuth when needed, stores the token locally, and renders a live report.
+
+Expected live UI badge:
+
+```text
+Data source: live ikas GraphQL
+Store: dev-emremutlu
+```
+
+Local runtime token storage:
+
+```text
+.ikas-runtime-tokens.json
+```
+
+This file is gitignored and must never be committed.
+
+Known dev-only console noise:
+
+- Next HMR websocket may fail over trycloudflare.
+- ikas CDN image may 404 until a Partner app icon is uploaded.
+
+## Current milestone
+
+`Product Data Health Checker` now works with live ikas `listProduct` data in read-only mode. Low Stock Alert remains a Phase 2 paid validation hook.

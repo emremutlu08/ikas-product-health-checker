@@ -34,6 +34,8 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
   }
 
   const { report, source } = await getProductHealthReport(new Date(), params.authorizedAppId);
+  const isLive = source === "http";
+  const csvHref = params.authorizedAppId ? `/api/report.csv?authorizedAppId=${encodeURIComponent(params.authorizedAppId)}` : "/api/report.csv";
   const topIssueCounts = Object.entries(report.issueCountsByCode).filter(([, count]) => count > 0);
 
   return (
@@ -49,12 +51,17 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
                 Ürün kataloğundaki SKU, barkod, görsel, açıklama, kategori, fiyat ve stok risklerini read-only tarar. V1 hedefi:
                 merchant’a ücretsiz değer gösterip Low Stock Alert için paid intent toplamak.
               </p>
-              <p className="mt-3 inline-flex rounded-full bg-white/10 px-3 py-1 text-sm text-slate-300 ring-1 ring-white/10">Data source: {source}{params.storeName ? ` · store: ${params.storeName}` : ""}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ${isLive ? "bg-emerald-400/15 text-emerald-200 ring-emerald-300/30" : "bg-amber-400/15 text-amber-200 ring-amber-300/30"}`}>
+                  Data source: {isLive ? "live ikas GraphQL" : "mock fallback"}
+                </span>
+                {params.storeName ? <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-sm text-slate-300 ring-1 ring-white/10">Store: {params.storeName}</span> : null}
+              </div>
             </div>
             <div className="flex gap-3">
               <a
                 download="ikas-product-health-report.csv"
-                href="/api/report.csv"
+                href={csvHref}
                 className="rounded-full bg-emerald-400 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-300"
               >
                 CSV indir
@@ -93,7 +100,7 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
           <div className="overflow-hidden rounded-3xl border border-white/10 bg-white text-slate-950">
             <div className="border-b border-slate-200 px-6 py-5">
               <h2 className="text-xl font-semibold">Issue table</h2>
-              <p className="mt-1 text-sm text-slate-500">{source === "mock" ? "Mock ikas dataset ile çalışan ilk read-only rapor ekranı." : "Canlı ikas GraphQL verisiyle üretilen read-only rapor."}</p>
+              <p className="mt-1 text-sm text-slate-500">{isLive ? "Canlı ikas GraphQL verisiyle üretilen read-only rapor." : "Mock ikas dataset ile çalışan fallback rapor ekranı."}</p>
             </div>
             <div className="max-h-[520px] overflow-auto">
               <table className="w-full min-w-[820px] text-left text-sm">

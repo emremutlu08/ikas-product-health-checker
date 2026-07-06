@@ -22,7 +22,7 @@ export async function getProductHealthReport(now = new Date(), authorizedAppId?:
   return { source, report: buildHealthReport(products, now) };
 }
 
-export async function getProductHealthReportCsv() {
-  const { report } = await getProductHealthReport();
+export async function getProductHealthReportCsv(authorizedAppId?: string | null) {
+  const { report } = await getProductHealthReport(new Date(), authorizedAppId);
   return issuesToCsv(report.issues);
 }

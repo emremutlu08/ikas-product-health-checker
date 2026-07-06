@@ -64,3 +64,34 @@ The app now includes minimal ikas OAuth routes:
 - `/api/oauth/callback/ikas`
 
 After OAuth succeeds, the server stores the access token in an encrypted iron-session cookie and `/api/report` uses live `listProduct` through `HttpIkasProductAdapter`.
+
+
+## Live validation completed — 2026-07-06
+
+Status: **passed** on `dev-emremutlu`.
+
+Observed working flow:
+
+1. `npx ikas app dev`
+2. merchant selected: `dev-emremutlu`
+3. Cloudflare tunnel created by ikas CLI
+4. OAuth callback reached `/api/oauth/callback/ikas`
+5. token persisted locally by `authorizedAppId` in `.ikas-runtime-tokens.json` (gitignored)
+6. root launch URL with `authorizedAppId` reads live products through `HttpIkasProductAdapter`
+7. UI shows `Data source: live ikas GraphQL`
+
+Verified live sample:
+
+- store: `dev-emremutlu`
+- product count: 1
+- active variant count: 1
+- score: 85/100
+- detected issues: missing SKU, barcode, description, brand, vendor
+
+Known non-blocking dev noise:
+
+- `/_next/webpack-hmr` WebSocket can fail over the Cloudflare tunnel in dev mode.
+- `cdn.myikas.com/images/<clientId>/null/image_360.webp` returns 404 until the Partner app has a real uploaded image/logo.
+- `authorized-app/<authorizedAppId>` can show ikas admin shell 404 when opened directly; use the app-store launch link or current tunnel URL instead.
+
+Current rule: live report is read-only. Do not add product, stock, price, or payment mutations to V1.
