@@ -22,7 +22,7 @@ export async function getProductHealthReport(now = new Date(), authorizedAppId?:
   const adapter = new HttpIkasProductAdapter(config.graphApiUrl, liveToken);
   try {
     const { products } = await adapter.listProducts();
-    return { source: "http", report: buildHealthReport(products, now) };
+    return { source: "http", report: buildHealthReport(products, now, { merchantId: storedToken?.merchantId }) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (authorizedAppId && message.includes("LOGIN_REQUIRED")) {
