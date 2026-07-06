@@ -110,3 +110,13 @@ Known dev-only console noise:
 ## Current milestone
 
 `Product Data Health Checker` now works with live ikas `listProduct` data in read-only mode. Low Stock Alert remains a Phase 2 paid validation hook.
+
+
+## Temporary app icon
+
+A temporary first-letter app icon was generated locally:
+
+- `public/app-icon.svg`
+- `public/image_360.webp` (360x360 WebP)
+
+ikas MCP currently does not expose a Partner app asset/upload operation, so the CDN 404 (`cdn.myikas.com/images/<clientId>/null/image_360.webp`) must be fixed by uploading `public/image_360.webp` from the Partner Dashboard app settings. After upload, Emre can replace it with a final branded icon.
