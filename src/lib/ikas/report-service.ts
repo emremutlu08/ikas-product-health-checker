@@ -14,7 +14,7 @@ export type ProductHealthReportResult = {
 export async function getProductHealthReport(now = new Date(), authorizedAppId?: string | null): Promise<ProductHealthReportResult> {
   const storedToken = await getIkasToken(authorizedAppId);
   const session = await getSession().catch(() => undefined);
-  const liveToken = storedToken?.accessToken ?? session?.accessToken;
+  const liveToken = authorizedAppId ? storedToken?.accessToken : session?.accessToken;
   const adapter = liveToken
     ? new HttpIkasProductAdapter(config.graphApiUrl, liveToken)
     : createProductAdapter();

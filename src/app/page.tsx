@@ -33,11 +33,26 @@ export default async function Home({
   const session = await getSession().catch(() => undefined);
   const storedToken = await getIkasToken(params.authorizedAppId);
 
+  if (!storedToken?.accessToken && params.authorizedAppId && params.storeName && params.oauth !== "skip") {
+    redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
+  }
+
   if (!storedToken?.accessToken && !session?.accessToken && params.storeName && params.oauth !== "skip") {
     redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
   }
 
-  const { report, source } = await getProductHealthReport(new Date(), params.authorizedAppId);
+  let reportResult: Awaited<ReturnType<typeof getProductHealthReport>>;
+  try {
+    reportResult = await getProductHealthReport(new Date(), params.authorizedAppId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (params.storeName && message.includes("LOGIN_REQUIRED") && params.oauth !== "skip") {
+      redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
+    }
+    throw error;
+  }
+
+  const { report, source } = reportResult;
   const isLive = source === "http";
   const selectedRule = params.rule;
   const csvHref = params.authorizedAppId ? `/api/report.csv?authorizedAppId=${encodeURIComponent(params.authorizedAppId)}` : "/api/report.csv";
