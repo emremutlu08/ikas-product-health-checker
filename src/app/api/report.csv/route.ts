@@ -15,6 +15,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown CSV report error";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("IKAS_LIVE_AUTH_REQUIRED") || message.includes("LOGIN_REQUIRED") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

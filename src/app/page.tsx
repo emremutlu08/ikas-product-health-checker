@@ -47,14 +47,13 @@ export default async function Home({
     reportResult = await getProductHealthReport(new Date(), params.authorizedAppId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (params.storeName && message.includes("LOGIN_REQUIRED") && params.oauth !== "skip") {
-      redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
+    if (effectiveStoreName && (message.includes("LOGIN_REQUIRED") || message.includes("IKAS_LIVE_AUTH_REQUIRED")) && params.oauth !== "skip") {
+      redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(effectiveStoreName)}`);
     }
     throw error;
   }
 
-  const { report, source } = reportResult;
-  const isLive = source === "http";
+  const { report } = reportResult;
   const selectedRule = params.rule;
   const csvHref = params.authorizedAppId ? `/api/report.csv?authorizedAppId=${encodeURIComponent(params.authorizedAppId)}` : "/api/report.csv";
   const selectedRuleLabel = selectedRule ? report.ruleSummaries.find((rule) => rule.code === selectedRule)?.label : undefined;
@@ -84,8 +83,8 @@ export default async function Home({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <span className={`rounded-full px-3 py-1 text-sm font-semibold ring-1 ${isLive ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
-              {isLive ? "Live ikas GraphQL" : "Mock fallback"}
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
+              Live ikas GraphQL
             </span>
             {effectiveStoreName ? <span className="rounded-full bg-white px-3 py-1 text-sm text-slate-600 ring-1 ring-slate-200">Store: {effectiveStoreName}</span> : null}
           </div>

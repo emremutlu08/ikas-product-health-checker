@@ -3,11 +3,11 @@ import { buildHealthReport } from "./health-rules";
 import { config } from "@/globals/config";
 import { getSession } from "@/lib/session";
 import { getIkasToken, invalidateIkasToken } from "./token-store";
-import { createProductAdapter, HttpIkasProductAdapter } from "./product-adapter";
+import { HttpIkasProductAdapter } from "./product-adapter";
 import type { HealthReport } from "./types";
 
 export type ProductHealthReportResult = {
-  source: "mock" | "http";
+  source: "http";
   report: HealthReport;
 };
 
@@ -15,12 +15,14 @@ export async function getProductHealthReport(now = new Date(), authorizedAppId?:
   const storedToken = await getIkasToken(authorizedAppId);
   const session = await getSession().catch(() => undefined);
   const liveToken = authorizedAppId ? storedToken?.accessToken : session?.accessToken;
-  const adapter = liveToken
-    ? new HttpIkasProductAdapter(config.graphApiUrl, liveToken)
-    : createProductAdapter();
+  if (!liveToken) {
+    throw new Error("IKAS_LIVE_AUTH_REQUIRED");
+  }
+
+  const adapter = new HttpIkasProductAdapter(config.graphApiUrl, liveToken);
   try {
-    const { source, products } = await adapter.listProducts();
-    return { source, report: buildHealthReport(products, now) };
+    const { products } = await adapter.listProducts();
+    return { source: "http", report: buildHealthReport(products, now) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (authorizedAppId && message.includes("LOGIN_REQUIRED")) {

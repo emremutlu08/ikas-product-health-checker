@@ -10,6 +10,7 @@ export async function GET(request: Request) {
     return Response.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown report error";
-    return Response.json({ error: message }, { status: 500 });
+    const status = message.includes("IKAS_LIVE_AUTH_REQUIRED") || message.includes("LOGIN_REQUIRED") ? 401 : 500;
+    return Response.json({ error: message }, { status });
   }
 }

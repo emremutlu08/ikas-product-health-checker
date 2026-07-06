@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { HttpIkasProductAdapter, MockIkasProductAdapter } from "./product-adapter";
+import { HttpIkasProductAdapter } from "./product-adapter";
 
 const firstPage = {
   data: {
@@ -38,14 +38,6 @@ const secondPage = {
     },
   },
 };
-
-describe("MockIkasProductAdapter", () => {
-  it("returns sample products", async () => {
-    const result = await new MockIkasProductAdapter().listProducts();
-    expect(result.source).toBe("mock");
-    expect(result.products.length).toBeGreaterThan(0);
-  });
-});
 
 describe("HttpIkasProductAdapter", () => {
   it("fetches every paginated listProduct page", async () => {
