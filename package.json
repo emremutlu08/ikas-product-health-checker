@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ikas/admin-api-client": "^2.1.0",
+    "@ikas/app-helpers": "^1.0.10",
     "graphql": "^16.14.2",
     "iron-session": "^8.0.4",
     "next": "16.2.10",

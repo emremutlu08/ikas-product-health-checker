@@ -11,6 +11,9 @@ importers:
       '@ikas/admin-api-client':
         specifier: ^2.1.0
         version: 2.1.0(graphql@16.14.2)
+      '@ikas/app-helpers':
+        specifier: ^1.0.10
+        version: 1.0.10
       graphql:
         specifier: ^16.14.2
         version: 16.14.2
@@ -227,6 +230,9 @@ packages:
         optional: true
       graphql:
         optional: true
+
+  '@ikas/app-helpers@1.0.10':
+    resolution: {integrity: sha512-TBO57Xcbxf6R5abh0DkxuJ4qrDqoQCxLmmmixjj0+hb4CaDgeO1eSTsL2E36DU0nP4rLGyev6p/cSEfVMkqXPQ==}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -2490,6 +2496,8 @@ snapshots:
   '@ikas/admin-api-client@2.1.0(graphql@16.14.2)':
     optionalDependencies:
       graphql: 16.14.2
+
+  '@ikas/app-helpers@1.0.10': {}
 
   '@img/colour@1.1.0':
     optional: true

@@ -1,3 +1,4 @@
+import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
 import { getProductHealthReport } from "@/lib/ikas/report-service";
 
 const issueLabels: Record<string, string> = {
@@ -26,6 +27,7 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
+      <IkasAppBridgeReady />
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-10 lg:px-8">
         <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8 shadow-2xl shadow-black/30">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
