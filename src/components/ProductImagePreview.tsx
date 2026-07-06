@@ -16,7 +16,7 @@ export function ProductImagePreview({ src, alt, label }: ProductImagePreviewProp
   if (failed || !src) {
     return (
       <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500 ring-1 ring-slate-200">
-        {label.slice(0, 3)}
+        {src ? "IMG" : label.slice(0, 3)}
       </div>
     );
   }
