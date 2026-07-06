@@ -33,6 +33,14 @@ describe("buildHealthReport", () => {
     expect(report.criticalCount).toBeGreaterThan(0);
     expect(report.score).toBeLessThan(100);
   });
+
+  it("builds mistake finder rule summaries and product rows", () => {
+    expect(report.affectedProductCount).toBeGreaterThan(0);
+    expect(report.ruleSummaries.find((rule) => rule.code === "incorrect_price")?.count).toBe(1);
+    expect(report.ruleSummaries.find((rule) => rule.code === "out_of_stock")?.count).toBe(1);
+    expect(report.ruleSummaries.find((rule) => rule.code === "same_sku")?.count).toBe(2);
+    expect(report.productRows.some((row) => row.productName === "Silver Ring" && row.mistakes.includes("Incorrect Price"))).toBe(true);
+  });
 });
 
 describe("issuesToCsv", () => {

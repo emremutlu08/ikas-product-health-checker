@@ -28,6 +28,8 @@ const LIST_PRODUCT_QUERY = /* GraphQL */ `
       data {
         id
         name
+        createdAt
+        updatedAt
         description
         shortDescription
         totalStock
@@ -37,9 +39,12 @@ const LIST_PRODUCT_QUERY = /* GraphQL */ `
         vendor { id name }
         categories { id name }
         tags { id name }
+        salesChannels { id status }
         metaData { id slug }
         variants {
           id
+          createdAt
+          updatedAt
           sku
           barcodeList
           isActive

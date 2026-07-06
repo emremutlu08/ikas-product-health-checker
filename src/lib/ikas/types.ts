@@ -31,6 +31,8 @@ export type IkasProductStockLocation = {
 
 export type IkasProductVariant = {
   id: string;
+  createdAt?: number | string | null;
+  updatedAt?: number | string | null;
   sku?: string | null;
   barcodeList?: string[] | null;
   images?: IkasProductImage[] | null;
@@ -41,8 +43,15 @@ export type IkasProductVariant = {
   deleted: boolean;
 };
 
+export type IkasProductSalesChannel = {
+  id: string;
+  status?: "HIDDEN" | "PASSIVE" | "VISIBLE" | null;
+};
+
 export type IkasProduct = {
   id: string;
+  createdAt?: number | string | null;
+  updatedAt?: number | string | null;
   name: string;
   brand?: IkasNamedEntity | null;
   vendor?: IkasNamedEntity | null;
@@ -52,6 +61,7 @@ export type IkasProduct = {
   shortDescription?: string | null;
   metaData?: { id: string; slug: string } | null;
   totalStock?: number | null;
+  salesChannels?: IkasProductSalesChannel[] | null;
   type: "BUNDLE" | "DIGITAL" | "MEMBERSHIP" | "PHYSICAL" | "SUBSCRIPTION";
   deleted: boolean;
   variants: IkasProductVariant[];
@@ -70,7 +80,9 @@ export type HealthIssueCode =
   | "missing_brand"
   | "missing_vendor"
   | "zero_stock_blocked"
-  | "missing_price";
+  | "missing_price"
+  | "duplicate_title"
+  | "weird_description";
 
 export type HealthIssue = {
   code: HealthIssueCode;
@@ -81,6 +93,31 @@ export type HealthIssue = {
   variantLabel?: string;
   message: string;
   value?: string | number;
+  productUpdatedAt?: string;
+};
+
+export type MistakeRuleCode =
+  | "incorrect_price"
+  | "out_of_stock"
+  | "missing_images"
+  | "missing_sku"
+  | "same_sku"
+  | "duplicate_title"
+  | "weird_description";
+
+export type MistakeRuleSummary = {
+  code: MistakeRuleCode;
+  label: string;
+  count: number;
+};
+
+export type ProductMistakeRow = {
+  productId: string;
+  productName: string;
+  imageLabel: string;
+  updatedAt?: string;
+  mistakes: string[];
+  actionLabel: string;
 };
 
 export type HealthReport = {
@@ -89,10 +126,14 @@ export type HealthReport = {
   productCount: number;
   variantCount: number;
   issueCount: number;
+  affectedProductCount: number;
+  scanStatus: "success" | "queued";
   issueCountsByCode: Record<HealthIssueCode, number>;
   criticalCount: number;
   warningCount: number;
   infoCount: number;
   lowStockRiskCount: number;
+  ruleSummaries: MistakeRuleSummary[];
+  productRows: ProductMistakeRow[];
   issues: HealthIssue[];
 };

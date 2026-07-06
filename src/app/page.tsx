@@ -3,28 +3,31 @@ import { getSession } from "@/lib/session";
 import { getIkasToken } from "@/lib/ikas/token-store";
 import { redirect } from "next/navigation";
 import { getProductHealthReport } from "@/lib/ikas/report-service";
+import type { MistakeRuleCode } from "@/lib/ikas/types";
 
-const issueLabels: Record<string, string> = {
-  missing_sku: "SKU eksik",
-  missing_barcode: "Barkod eksik",
-  duplicate_sku: "Duplicate SKU",
-  duplicate_barcode: "Duplicate barkod",
-  missing_image: "Görsel eksik",
-  missing_description: "Açıklama eksik",
-  missing_category: "Kategori eksik",
-  missing_brand: "Brand eksik",
-  missing_vendor: "Vendor eksik",
-  zero_stock_blocked: "Stok riski",
-  missing_price: "Fiyat eksik",
-};
-
-function severityClass(severity: string) {
-  if (severity === "critical") return "bg-red-50 text-red-700 ring-red-200";
-  if (severity === "warning") return "bg-amber-50 text-amber-700 ring-amber-200";
-  return "bg-slate-50 text-slate-700 ring-slate-200";
+function formatDate(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("tr-TR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
-export default async function Home({ searchParams }: { searchParams?: Promise<{ storeName?: string; authorizedAppId?: string; oauth?: string }> }) {
+function appendRuleToHref(baseHref: string, rule?: string) {
+  if (!rule) return baseHref;
+  return `${baseHref}${baseHref.includes("?") ? "&" : "?"}rule=${encodeURIComponent(rule)}`;
+}
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams?: Promise<{ storeName?: string; authorizedAppId?: string; oauth?: string; rule?: MistakeRuleCode }>;
+}) {
   const params = (await searchParams) ?? {};
   const session = await getSession().catch(() => undefined);
   const storedToken = await getIkasToken(params.authorizedAppId);
@@ -35,142 +38,166 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
 
   const { report, source } = await getProductHealthReport(new Date(), params.authorizedAppId);
   const isLive = source === "http";
+  const selectedRule = params.rule;
   const csvHref = params.authorizedAppId ? `/api/report.csv?authorizedAppId=${encodeURIComponent(params.authorizedAppId)}` : "/api/report.csv";
-  const topIssueCounts = Object.entries(report.issueCountsByCode).filter(([, count]) => count > 0);
-  const hasProducts = report.productCount > 0;
-  const hasIssues = report.issueCount > 0;
+  const selectedRuleLabel = selectedRule ? report.ruleSummaries.find((rule) => rule.code === selectedRule)?.label : undefined;
+  const productRows = selectedRuleLabel
+    ? report.productRows.filter((row) => row.mistakes.includes(selectedRuleLabel))
+    : report.productRows;
+  const launchQuery = new URLSearchParams();
+  if (params.storeName) launchQuery.set("storeName", params.storeName);
+  if (params.authorizedAppId) launchQuery.set("authorizedAppId", params.authorizedAppId);
+  launchQuery.set("oauth", "skip");
+  const baseDashboardHref = `/?${launchQuery.toString()}`;
+  const scanStatus = report.scanStatus === "success" ? "Success" : "Queued";
   const lowStockIntentHref = `mailto:mutluemre93@gmail.com?subject=${encodeURIComponent("Low Stock Alert ilgimi çekti")}&body=${encodeURIComponent(
-    `Store: ${params.storeName ?? "unknown"}
-Current low stock risks: ${report.lowStockRiskCount}
-Authorized app: ${params.authorizedAppId ?? "unknown"}`,
+    `Store: ${params.storeName ?? "unknown"}\nCurrent low stock risks: ${report.lowStockRiskCount}\nAuthorized app: ${params.authorizedAppId ?? "unknown"}`,
   )}`;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
+    <main className="min-h-screen bg-[#f6f6f7] text-[#202223]">
       <IkasAppBridgeReady />
-      <section className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-10 lg:px-8">
-        <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8 shadow-2xl shadow-black/30">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <p className="mb-3 text-sm font-semibold uppercase tracking-[0.3em] text-emerald-300">ikas admin app MVP</p>
-              <h1 className="text-4xl font-bold tracking-tight text-white md:text-6xl">Product Data Health Checker</h1>
-              <p className="mt-4 text-lg leading-8 text-slate-300">
-                Ürün kataloğundaki SKU, barkod, görsel, açıklama, kategori, fiyat ve stok risklerini read-only tarar. V1 hedefi:
-                merchant’a ücretsiz değer gösterip Low Stock Alert için paid intent toplamak.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ${isLive ? "bg-emerald-400/15 text-emerald-200 ring-emerald-300/30" : "bg-amber-400/15 text-amber-200 ring-amber-300/30"}`}>
-                  Data source: {isLive ? "live ikas GraphQL" : "mock fallback"}
-                </span>
-                {params.storeName ? <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-sm text-slate-300 ring-1 ring-white/10">Store: {params.storeName}</span> : null}
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <a
-                download="ikas-product-health-report.csv"
-                href={csvHref}
-                className="rounded-full bg-emerald-400 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-300"
-              >
-                CSV indir
-              </a>
-              <a
-                href="#low-stock-cta"
-                className="rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-              >
-                Low Stock Alert ilgimi çekti
-              </a>
+      <section className="mx-auto flex w-full max-w-7xl flex-col gap-7 px-4 py-8 sm:px-6 lg:px-8">
+        <header className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-lg font-black text-emerald-300">P</div>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">ikas admin app MVP</p>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-950">Product Data Health Checker</h1>
             </div>
           </div>
-        </div>
+          <div className="flex flex-wrap gap-2">
+            <span className={`rounded-full px-3 py-1 text-sm font-semibold ring-1 ${isLive ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
+              {isLive ? "Live ikas GraphQL" : "Mock fallback"}
+            </span>
+            {params.storeName ? <span className="rounded-full bg-white px-3 py-1 text-sm text-slate-600 ring-1 ring-slate-200">Store: {params.storeName}</span> : null}
+          </div>
+        </header>
 
-        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-          <Metric title="Health score" value={`${report.score}/100`} tone="emerald" />
-          <Metric title="Ürün" value={report.productCount} />
-          <Metric title="Aktif varyant" value={report.variantCount} />
-          <Metric title="Toplam sorun" value={report.issueCount} tone="amber" />
-          <Metric title="Kritik" value={report.criticalCount} tone="red" />
+        <section className="rounded-3xl bg-blue-50 px-6 py-5 ring-1 ring-blue-100 md:flex md:items-center md:justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-slate-700">Find product data mistakes before they cost sales.</h2>
+            <p className="mt-1 text-slate-600">SKU, barcode, price, image, duplicate title, duplicate SKU and stock rules are checked in read-only mode.</p>
+            <a href="#low-stock-cta" className="mt-3 inline-flex text-sm font-bold text-blue-600">Low Stock Alert interest</a>
+          </div>
+          <div className="mt-4 flex text-5xl text-amber-300 md:mt-0" aria-hidden>
+            ☆☆☆☆☆
+          </div>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-[0.9fr_1.4fr]">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-            <h2 className="text-xl font-semibold text-white">Sorun dağılımı</h2>
-            <div className="mt-5 space-y-3">
-              {topIssueCounts.length ? (
-                topIssueCounts.map(([code, count]) => (
-                  <div key={code} className="flex items-center justify-between rounded-2xl bg-slate-900/80 px-4 py-3 ring-1 ring-white/10">
-                    <span className="text-sm text-slate-300">{issueLabels[code] ?? code}</span>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-sm font-bold text-slate-950">{count}</span>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-2xl bg-slate-900/80 px-4 py-5 text-sm leading-6 text-slate-300 ring-1 ring-white/10">
-                  {hasProducts ? "Bu taramada sorun bulunmadı. Katalog şu an temiz görünüyor." : "Bu mağazada taranacak aktif ürün bulunamadı. Ürün eklenince rapor otomatik anlamlı hale gelir."}
-                </div>
-              )}
+        <section className="rounded-3xl bg-white p-7 shadow-sm ring-1 ring-slate-200">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <SummaryItem icon="⬢" iconClass="bg-orange-50 text-orange-500" title="Total product(variants) in store" value={`${report.productCount} (${report.variantCount})`} />
+            <SummaryItem icon="!" iconClass="bg-emerald-50 text-emerald-600" title="Total affected products" value={report.affectedProductCount} />
+            <SummaryItem icon="▣" iconClass="bg-blue-50 text-blue-600" title={`Last scanned (${formatDate(report.generatedAt)})`} value={scanStatus} />
+            <SummaryItem icon="✓" iconClass="bg-slate-100 text-slate-700" title="Health score" value={`${report.score}/100`} />
+          </div>
+        </section>
+
+        <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-950">Rules that watch over your store</h2>
+              <p className="mt-1 text-sm text-slate-500">Click a rule to filter affected products. All checks are read-only.</p>
             </div>
+            <a className="rounded-xl bg-orange-500 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-600" href={baseDashboardHref}>
+              Apply Filter
+            </a>
           </div>
 
-          <div className="overflow-hidden rounded-3xl border border-white/10 bg-white text-slate-950">
-            <div className="border-b border-slate-200 px-6 py-5">
-              <h2 className="text-xl font-semibold">Issue table</h2>
-              <p className="mt-1 text-sm text-slate-500">{isLive ? "Canlı ikas GraphQL verisiyle üretilen read-only rapor." : "Mock ikas dataset ile çalışan fallback rapor ekranı."}</p>
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {report.ruleSummaries.map((rule) => {
+              const active = selectedRule === rule.code;
+              return (
+                <a
+                  key={rule.code}
+                  className={`relative flex min-h-20 items-center justify-center rounded-2xl px-5 py-4 text-center text-lg font-bold ring-1 transition ${
+                    active ? "border-orange-500 bg-orange-50 text-orange-700 ring-orange-400" : "bg-slate-100 text-slate-950 ring-slate-300 hover:bg-orange-50"
+                  }`}
+                  href={appendRuleToHref(baseDashboardHref, rule.code)}
+                >
+                  {rule.label}
+                  <span className="absolute -right-3 -top-3 flex h-10 min-w-10 items-center justify-center rounded-full bg-red-600 px-2 text-sm font-black text-white">
+                    {rule.count}
+                  </span>
+                </a>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-950">Display published products only with rules selected above</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {selectedRuleLabel ? `${selectedRuleLabel} filtresi açık.` : "Tüm seçili rule sonuçları gösteriliyor."}
+              </p>
             </div>
-            <div className="max-h-[520px] overflow-auto">
-              <table className="w-full min-w-[820px] text-left text-sm">
-                <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Severity</th>
-                    <th className="px-4 py-3">Issue</th>
-                    <th className="px-4 py-3">Ürün</th>
-                    <th className="px-4 py-3">Varyant</th>
-                    <th className="px-4 py-3">Mesaj</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {hasIssues ? (
-                    report.issues.map((issue, index) => (
-                      <tr key={`${issue.code}-${issue.productId}-${issue.variantId ?? "product"}-${index}`} className="hover:bg-slate-50">
-                        <td className="px-4 py-3">
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${severityClass(issue.severity)}`}>
-                            {issue.severity}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-medium">{issueLabels[issue.code]}</td>
-                        <td className="px-4 py-3">{issue.productName}</td>
-                        <td className="px-4 py-3 text-slate-500">{issue.variantLabel ?? "—"}</td>
-                        <td className="px-4 py-3 text-slate-600">{issue.message}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-10 text-center text-slate-500">
-                        {hasProducts ? "Sorun bulunmadı. CSV export yine de rapor arşivi için kullanılabilir." : "Aktif ürün bulunamadı. ikas ürün kataloğuna ürün eklendiğinde bu tablo dolacak."}
+            <a download="ikas-product-health-report.csv" href={csvHref} className="rounded-xl bg-orange-500 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-600">
+              Download CSV
+            </a>
+          </div>
+
+          <div className="mt-6 overflow-hidden rounded-2xl ring-1 ring-slate-200">
+            <table className="w-full min-w-[860px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-4">Image</th>
+                  <th className="px-4 py-4">Title</th>
+                  <th className="px-4 py-4">Errors/Mistakes</th>
+                  <th className="px-4 py-4">Updated At</th>
+                  <th className="px-4 py-4">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {productRows.length ? (
+                  productRows.map((row) => (
+                    <tr key={row.productId} className="hover:bg-slate-50">
+                      <td className="px-4 py-4">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500 ring-1 ring-slate-200">
+                          {row.imageLabel.slice(0, 3)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 font-semibold text-violet-600">{row.productName}</td>
+                      <td className="px-4 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          {row.mistakes.map((mistake) => (
+                            <span key={mistake} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                              {mistake}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 text-slate-700">{formatDate(row.updatedAt)}</td>
+                      <td className="px-4 py-4">
+                        <span className="font-semibold text-violet-600">Review</span>
                       </td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-10 text-center text-lg font-semibold text-slate-700">
+                      Currently, there are no products matching this rule. Try updating or select a different rule.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
 
-        <section id="low-stock-cta" className="rounded-3xl border border-emerald-300/30 bg-emerald-300/10 p-7">
+        <section id="low-stock-cta" className="rounded-3xl bg-slate-950 p-7 text-white shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-200">Paid MVP hook</p>
-              <h2 className="mt-2 text-2xl font-bold text-white">{report.lowStockRiskCount} stok riski bulundu</h2>
+              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-300">Paid MVP hook</p>
+              <h2 className="mt-2 text-2xl font-bold">{report.lowStockRiskCount} out-of-stock risk found</h2>
               <p className="mt-2 max-w-3xl text-slate-300">
-                Faz 2 için ödeme veya cron eklemeden önce merchant intent ölçüyoruz. Bu buton şimdilik sadece talep toplama placeholder’ı;
-                ürün, stok veya ödeme datasını değiştirmez.
+                Next paid slice: daily low-stock summary, threshold-based alerts, and email/Slack notification. No stock or product mutation in V1.
               </p>
-              <ul className="mt-4 grid gap-2 text-sm text-emerald-50/90 md:grid-cols-3">
-                <li className="rounded-2xl bg-slate-950/40 px-3 py-2 ring-1 ring-white/10">Günlük stok özeti</li>
-                <li className="rounded-2xl bg-slate-950/40 px-3 py-2 ring-1 ring-white/10">Eşik bazlı uyarı</li>
-                <li className="rounded-2xl bg-slate-950/40 px-3 py-2 ring-1 ring-white/10">Email/Slack bildirimi</li>
-              </ul>
             </div>
             <a className="rounded-full bg-white px-5 py-3 text-center text-sm font-bold text-slate-950 transition hover:bg-emerald-100" href={lowStockIntentHref}>
-              İlgimi çekti
+              I’m interested
             </a>
           </div>
         </section>
@@ -179,18 +206,14 @@ Authorized app: ${params.authorizedAppId ?? "unknown"}`,
   );
 }
 
-function Metric({ title, value, tone = "slate" }: { title: string; value: string | number; tone?: "slate" | "emerald" | "amber" | "red" }) {
-  const tones = {
-    slate: "text-white",
-    emerald: "text-emerald-300",
-    amber: "text-amber-300",
-    red: "text-red-300",
-  };
-
+function SummaryItem({ icon, iconClass, title, value }: { icon: string; iconClass: string; title: string; value: string | number }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-      <p className="text-sm text-slate-400">{title}</p>
-      <p className={`mt-3 text-4xl font-bold ${tones[tone]}`}>{value}</p>
+    <div className="flex items-center gap-5">
+      <div className={`flex h-20 w-20 shrink-0 items-center justify-center rounded-full text-3xl font-black ${iconClass}`}>{icon}</div>
+      <div>
+        <p className="text-lg font-semibold text-slate-600">{title}</p>
+        <p className="mt-2 text-3xl font-black text-slate-950">{value}</p>
+      </div>
     </div>
   );
 }
