@@ -53,3 +53,14 @@ npx ikas app info
 ```
 
 4. Share the output or tell Hermes to continue.
+
+
+## OAuth integration added
+
+The app now includes minimal ikas OAuth routes:
+
+- `/authorize-store`
+- `/api/oauth/authorize/ikas`
+- `/api/oauth/callback/ikas`
+
+After OAuth succeeds, the server stores the access token in an encrypted iron-session cookie and `/api/report` uses live `listProduct` through `HttpIkasProductAdapter`.

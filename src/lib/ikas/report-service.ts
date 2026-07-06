@@ -1,6 +1,8 @@
 import { issuesToCsv } from "./csv";
 import { buildHealthReport } from "./health-rules";
-import { createProductAdapter } from "./product-adapter";
+import { config } from "@/globals/config";
+import { getSession } from "@/lib/session";
+import { createProductAdapter, HttpIkasProductAdapter } from "./product-adapter";
 import type { HealthReport } from "./types";
 
 export type ProductHealthReportResult = {
@@ -9,7 +11,10 @@ export type ProductHealthReportResult = {
 };
 
 export async function getProductHealthReport(now = new Date()): Promise<ProductHealthReportResult> {
-  const adapter = createProductAdapter();
+  const session = await getSession().catch(() => undefined);
+  const adapter = session?.accessToken
+    ? new HttpIkasProductAdapter(config.graphApiUrl, session.accessToken)
+    : createProductAdapter();
   const { source, products } = await adapter.listProducts();
   return { source, report: buildHealthReport(products, now) };
 }
