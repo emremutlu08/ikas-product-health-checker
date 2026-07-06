@@ -50,6 +50,9 @@ export default async function Home({
     if (effectiveStoreName && (message.includes("LOGIN_REQUIRED") || message.includes("IKAS_LIVE_AUTH_REQUIRED")) && params.oauth !== "skip") {
       redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(effectiveStoreName)}`);
     }
+    if (message.includes("IKAS_LIVE_AUTH_REQUIRED") && !effectiveStoreName) {
+      redirect("/authorize-store");
+    }
     throw error;
   }
 
