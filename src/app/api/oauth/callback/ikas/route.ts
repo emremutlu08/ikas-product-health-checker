@@ -1,6 +1,7 @@
 import { config } from "@/globals/config";
 import { getRedirectUri, getRequestBaseUrl, requireOAuthConfig } from "@/helpers/api-helpers";
 import { getSession } from "@/lib/session";
+import { saveIkasToken } from "@/lib/ikas/token-store";
 import { validateRequest } from "@/lib/validation";
 import { OAuthAPI } from "@ikas/admin-api-client";
 import { NextRequest, NextResponse } from "next/server";
@@ -40,6 +41,36 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.data?.access_token) {
       return NextResponse.json({ error: "Failed to retrieve ikas access token" }, { status: 500 });
+    }
+
+
+    const contextResponse = await fetch(config.graphApiUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${tokenResponse.data.access_token}`,
+      },
+      body: JSON.stringify({
+        query: `query getIkasAppContext { getMerchant { id storeName } getAuthorizedApp { id } }`,
+      }),
+      cache: "no-store",
+    });
+
+    const contextPayload = await contextResponse.json();
+    const authorizedAppId = contextPayload?.data?.getAuthorizedApp?.id;
+    const merchantId = contextPayload?.data?.getMerchant?.id;
+    const storeName = contextPayload?.data?.getMerchant?.storeName || validation.data.storeName || session.storeName;
+
+    if (authorizedAppId) {
+      await saveIkasToken({
+        authorizedAppId,
+        merchantId,
+        storeName,
+        accessToken: tokenResponse.data.access_token,
+        refreshToken: tokenResponse.data.refresh_token,
+        tokenType: tokenResponse.data.token_type,
+        expiresAt: Date.now() + tokenResponse.data.expires_in * 1000,
+      });
     }
 
     session.accessToken = tokenResponse.data.access_token;

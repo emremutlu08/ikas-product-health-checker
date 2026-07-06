@@ -42,3 +42,6 @@ next-env.d.ts
 
 # ikas CLI local app credentials
 .ikas/
+
+# local OAuth runtime tokens
+.ikas-runtime-tokens.json

@@ -2,6 +2,7 @@ import { issuesToCsv } from "./csv";
 import { buildHealthReport } from "./health-rules";
 import { config } from "@/globals/config";
 import { getSession } from "@/lib/session";
+import { getIkasToken } from "./token-store";
 import { createProductAdapter, HttpIkasProductAdapter } from "./product-adapter";
 import type { HealthReport } from "./types";
 
@@ -10,10 +11,12 @@ export type ProductHealthReportResult = {
   report: HealthReport;
 };
 
-export async function getProductHealthReport(now = new Date()): Promise<ProductHealthReportResult> {
+export async function getProductHealthReport(now = new Date(), authorizedAppId?: string | null): Promise<ProductHealthReportResult> {
+  const storedToken = await getIkasToken(authorizedAppId);
   const session = await getSession().catch(() => undefined);
-  const adapter = session?.accessToken
-    ? new HttpIkasProductAdapter(config.graphApiUrl, session.accessToken)
+  const liveToken = storedToken?.accessToken ?? session?.accessToken;
+  const adapter = liveToken
+    ? new HttpIkasProductAdapter(config.graphApiUrl, liveToken)
     : createProductAdapter();
   const { source, products } = await adapter.listProducts();
   return { source, report: buildHealthReport(products, now) };

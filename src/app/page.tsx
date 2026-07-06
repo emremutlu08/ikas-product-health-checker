@@ -1,5 +1,6 @@
 import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
 import { getSession } from "@/lib/session";
+import { getIkasToken } from "@/lib/ikas/token-store";
 import { redirect } from "next/navigation";
 import { getProductHealthReport } from "@/lib/ikas/report-service";
 
@@ -23,15 +24,16 @@ function severityClass(severity: string) {
   return "bg-slate-50 text-slate-700 ring-slate-200";
 }
 
-export default async function Home({ searchParams }: { searchParams?: Promise<{ storeName?: string; oauth?: string }> }) {
+export default async function Home({ searchParams }: { searchParams?: Promise<{ storeName?: string; authorizedAppId?: string; oauth?: string }> }) {
   const params = (await searchParams) ?? {};
   const session = await getSession().catch(() => undefined);
+  const storedToken = await getIkasToken(params.authorizedAppId);
 
-  if (!session?.accessToken && params.storeName && params.oauth !== "skip") {
+  if (!storedToken?.accessToken && !session?.accessToken && params.storeName && params.oauth !== "skip") {
     redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
   }
 
-  const { report, source } = await getProductHealthReport();
+  const { report, source } = await getProductHealthReport(new Date(), params.authorizedAppId);
   const topIssueCounts = Object.entries(report.issueCountsByCode).filter(([, count]) => count > 0);
 
   return (
