@@ -30,5 +30,15 @@ export async function saveIkasToken(token: StoredIkasToken) {
 export async function getIkasToken(authorizedAppId?: string | null) {
   if (!authorizedAppId) return undefined;
   const store = await readStore();
-  return store[authorizedAppId];
+  const token = store[authorizedAppId];
+  if (!token) return undefined;
+
+  // Treat tokens as expired one minute early so the app launches OAuth instead of rendering a broken report.
+  if (token.expiresAt && token.expiresAt <= Date.now() + 60_000) {
+    delete store[authorizedAppId];
+    await fs.writeFile(TOKEN_STORE_PATH, JSON.stringify(store, null, 2));
+    return undefined;
+  }
+
+  return token;
 }

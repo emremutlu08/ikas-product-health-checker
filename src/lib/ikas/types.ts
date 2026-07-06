@@ -115,6 +115,9 @@ export type ProductMistakeRow = {
   productId: string;
   productName: string;
   imageLabel: string;
+  imageId?: string;
+  imageFileName?: string | null;
+  imageSrc?: string;
   updatedAt?: string;
   mistakes: string[];
   actionLabel: string;

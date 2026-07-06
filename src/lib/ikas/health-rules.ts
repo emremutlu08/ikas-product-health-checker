@@ -89,9 +89,16 @@ function isoDate(value: string | number | null | undefined) {
   return date.toISOString();
 }
 
-function productImageLabel(product: IkasProduct) {
+function productImageData(product: IkasProduct) {
   const image = activeVariants(product).flatMap((variant) => variant.images ?? []).find((item) => item.imageId || item.fileName);
-  return image?.fileName || image?.imageId || product.name.slice(0, 2).toLocaleUpperCase("tr-TR");
+  const imageFileName = image?.fileName ?? null;
+  const imageId = image?.imageId ?? undefined;
+  return {
+    imageLabel: imageFileName || imageId || product.name.slice(0, 2).toLocaleUpperCase("tr-TR"),
+    imageId,
+    imageFileName,
+    imageSrc: imageId ? `https://cdn.myikas.com/images/${imageId}/${imageFileName ?? "null"}/image_360.webp` : undefined,
+  };
 }
 
 function addIssue(
@@ -247,10 +254,11 @@ export function buildHealthReport(products: IkasProduct[], now = new Date()): He
     const rule = ISSUE_TO_RULE[issue.code];
     if (!rule) continue;
     const product = visibleProducts.find((item) => item.id === issue.productId);
+    const imageData = product ? productImageData(product) : { imageLabel: issue.productName.slice(0, 2).toLocaleUpperCase("tr-TR") };
     const current = grouped.get(issue.productId) ?? {
       productId: issue.productId,
       productName: issue.productName,
-      imageLabel: product ? productImageLabel(product) : issue.productName.slice(0, 2).toLocaleUpperCase("tr-TR"),
+      ...imageData,
       updatedAt: issue.productUpdatedAt,
       mistakes: [],
       actionLabel: "Review",

@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { getIkasToken } from "@/lib/ikas/token-store";
 import { redirect } from "next/navigation";
 import { getProductHealthReport } from "@/lib/ikas/report-service";
+import { ProductImagePreview } from "@/components/ProductImagePreview";
 import type { MistakeRuleCode } from "@/lib/ikas/types";
 
 function formatDate(value?: string) {
@@ -112,12 +113,16 @@ export default async function Home({
                 <a
                   key={rule.code}
                   className={`relative flex min-h-20 items-center justify-center rounded-2xl px-5 py-4 text-center text-lg font-bold ring-1 transition ${
-                    active ? "border-orange-500 bg-orange-50 text-orange-700 ring-orange-400" : "bg-slate-100 text-slate-950 ring-slate-300 hover:bg-orange-50"
+                    active
+                      ? "border-orange-500 bg-orange-50 text-orange-700 ring-orange-400"
+                      : rule.count === 0
+                        ? "bg-emerald-50 text-emerald-800 ring-emerald-200 hover:bg-emerald-100"
+                        : "bg-slate-100 text-slate-950 ring-slate-300 hover:bg-orange-50"
                   }`}
                   href={appendRuleToHref(baseDashboardHref, rule.code)}
                 >
                   {rule.label}
-                  <span className="absolute -right-3 -top-3 flex h-10 min-w-10 items-center justify-center rounded-full bg-red-600 px-2 text-sm font-black text-white">
+                  <span className={`absolute -right-3 -top-3 flex h-10 min-w-10 items-center justify-center rounded-full px-2 text-sm font-black text-white ${rule.count === 0 ? "bg-emerald-600" : "bg-red-600"}`}>
                     {rule.count}
                   </span>
                 </a>
@@ -155,9 +160,7 @@ export default async function Home({
                   productRows.map((row) => (
                     <tr key={row.productId} className="hover:bg-slate-50">
                       <td className="px-4 py-4">
-                        <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500 ring-1 ring-slate-200">
-                          {row.imageLabel.slice(0, 3)}
-                        </div>
+                        <ProductImagePreview alt={row.productName} label={row.imageLabel} src={row.imageSrc} />
                       </td>
                       <td className="px-4 py-4 font-semibold text-violet-600">{row.productName}</td>
                       <td className="px-4 py-4">
@@ -171,7 +174,7 @@ export default async function Home({
                       </td>
                       <td className="px-4 py-4 text-slate-700">{formatDate(row.updatedAt)}</td>
                       <td className="px-4 py-4">
-                        <span className="font-semibold text-violet-600">Review</span>
+                        <a className="font-semibold text-violet-600 hover:text-violet-800" href={params.storeName ? `https://${params.storeName}.myikas.com/admin/product/edit/${row.productId}` : `#${row.productId}`} target="_blank" rel="noreferrer">Review</a>
                       </td>
                     </tr>
                   ))
