@@ -1,0 +1,98 @@
+export type IkasNamedEntity = {
+  id: string;
+  name: string;
+};
+
+export type IkasProductImage = {
+  imageId?: string | null;
+  fileName?: string | null;
+  isMain?: boolean | null;
+  isVideo?: boolean | null;
+  order?: number | null;
+};
+
+export type IkasProductPrice = {
+  sellPrice?: number | null;
+  discountPrice?: number | null;
+  buyPrice?: number | null;
+  currencyCode?: string | null;
+  currencySymbol?: string | null;
+  priceListId?: string | null;
+};
+
+export type IkasProductStockLocation = {
+  id: string;
+  productId: string;
+  variantId: string;
+  stockLocationId: string;
+  stockCount: number;
+  deleted: boolean;
+};
+
+export type IkasProductVariant = {
+  id: string;
+  sku?: string | null;
+  barcodeList?: string[] | null;
+  images?: IkasProductImage[] | null;
+  isActive: boolean;
+  sellIfOutOfStock?: boolean | null;
+  prices?: IkasProductPrice[] | null;
+  stocks?: IkasProductStockLocation[] | null;
+  deleted: boolean;
+};
+
+export type IkasProduct = {
+  id: string;
+  name: string;
+  brand?: IkasNamedEntity | null;
+  vendor?: IkasNamedEntity | null;
+  categories?: IkasNamedEntity[] | null;
+  tags?: IkasNamedEntity[] | null;
+  description?: string | null;
+  shortDescription?: string | null;
+  metaData?: { id: string; slug: string } | null;
+  totalStock?: number | null;
+  type: "BUNDLE" | "DIGITAL" | "MEMBERSHIP" | "PHYSICAL" | "SUBSCRIPTION";
+  deleted: boolean;
+  variants: IkasProductVariant[];
+};
+
+export type HealthIssueSeverity = "critical" | "warning" | "info";
+
+export type HealthIssueCode =
+  | "missing_sku"
+  | "missing_barcode"
+  | "duplicate_sku"
+  | "duplicate_barcode"
+  | "missing_image"
+  | "missing_description"
+  | "missing_category"
+  | "missing_brand"
+  | "missing_vendor"
+  | "zero_stock_blocked"
+  | "missing_price";
+
+export type HealthIssue = {
+  code: HealthIssueCode;
+  severity: HealthIssueSeverity;
+  productId: string;
+  productName: string;
+  variantId?: string;
+  variantLabel?: string;
+  message: string;
+  value?: string | number;
+};
+
+export type HealthReport = {
+  generatedAt: string;
+  score: number;
+  productCount: number;
+  variantCount: number;
+  issueCount: number;
+  issueCountsByCode: Record<HealthIssueCode, number>;
+  criticalCount: number;
+  warningCount: number;
+  infoCount: number;
+  lowStockRiskCount: number;
+  issues: HealthIssue[];
+};

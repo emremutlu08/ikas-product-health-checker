@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+import { buildHealthReport } from "./health-rules";
+import { issuesToCsv } from "./csv";
+import { sampleProducts } from "./sample-products";
+
+const report = buildHealthReport(sampleProducts, new Date("2026-07-06T00:00:00.000Z"));
+
+describe("buildHealthReport", () => {
+  it("counts active products and variants", () => {
+    expect(report.productCount).toBe(3);
+    expect(report.variantCount).toBe(4);
+  });
+
+  it("detects missing merchant-critical fields", () => {
+    expect(report.issueCountsByCode.missing_sku).toBe(1);
+    expect(report.issueCountsByCode.missing_barcode).toBe(1);
+    expect(report.issueCountsByCode.missing_image).toBe(1);
+    expect(report.issueCountsByCode.missing_description).toBe(1);
+    expect(report.issueCountsByCode.missing_category).toBe(1);
+    expect(report.issueCountsByCode.missing_brand).toBe(1);
+    expect(report.issueCountsByCode.missing_vendor).toBe(2);
+  });
+
+  it("detects duplicate identifiers across active variants", () => {
+    expect(report.issueCountsByCode.duplicate_sku).toBe(2);
+    expect(report.issueCountsByCode.duplicate_barcode).toBe(2);
+  });
+
+  it("detects stock and pricing risks", () => {
+    expect(report.issueCountsByCode.zero_stock_blocked).toBe(1);
+    expect(report.issueCountsByCode.missing_price).toBe(1);
+    expect(report.lowStockRiskCount).toBe(1);
+    expect(report.criticalCount).toBeGreaterThan(0);
+    expect(report.score).toBeLessThan(100);
+  });
+});
+
+describe("issuesToCsv", () => {
+  it("exports issue rows as csv", () => {
+    const csv = issuesToCsv(report.issues);
+    expect(csv.split("\n")[0]).toBe("severity,code,productName,productId,variantLabel,variantId,value,message");
+    expect(csv).toContain("duplicate_sku");
+    expect(csv).toContain("Silver Ring");
+  });
+});
