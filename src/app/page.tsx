@@ -37,6 +37,13 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
   const isLive = source === "http";
   const csvHref = params.authorizedAppId ? `/api/report.csv?authorizedAppId=${encodeURIComponent(params.authorizedAppId)}` : "/api/report.csv";
   const topIssueCounts = Object.entries(report.issueCountsByCode).filter(([, count]) => count > 0);
+  const hasProducts = report.productCount > 0;
+  const hasIssues = report.issueCount > 0;
+  const lowStockIntentHref = `mailto:mutluemre93@gmail.com?subject=${encodeURIComponent("Low Stock Alert ilgimi çekti")}&body=${encodeURIComponent(
+    `Store: ${params.storeName ?? "unknown"}
+Current low stock risks: ${report.lowStockRiskCount}
+Authorized app: ${params.authorizedAppId ?? "unknown"}`,
+  )}`;
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -70,7 +77,7 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
                 href="#low-stock-cta"
                 className="rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
               >
-                Low Stock Alert CTA
+                Low Stock Alert ilgimi çekti
               </a>
             </div>
           </div>
@@ -88,12 +95,18 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <h2 className="text-xl font-semibold text-white">Sorun dağılımı</h2>
             <div className="mt-5 space-y-3">
-              {topIssueCounts.map(([code, count]) => (
-                <div key={code} className="flex items-center justify-between rounded-2xl bg-slate-900/80 px-4 py-3 ring-1 ring-white/10">
-                  <span className="text-sm text-slate-300">{issueLabels[code] ?? code}</span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-sm font-bold text-slate-950">{count}</span>
+              {topIssueCounts.length ? (
+                topIssueCounts.map(([code, count]) => (
+                  <div key={code} className="flex items-center justify-between rounded-2xl bg-slate-900/80 px-4 py-3 ring-1 ring-white/10">
+                    <span className="text-sm text-slate-300">{issueLabels[code] ?? code}</span>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-sm font-bold text-slate-950">{count}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-2xl bg-slate-900/80 px-4 py-5 text-sm leading-6 text-slate-300 ring-1 ring-white/10">
+                  {hasProducts ? "Bu taramada sorun bulunmadı. Katalog şu an temiz görünüyor." : "Bu mağazada taranacak aktif ürün bulunamadı. Ürün eklenince rapor otomatik anlamlı hale gelir."}
                 </div>
-              ))}
+              )}
             </div>
           </div>
 
@@ -114,19 +127,27 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {report.issues.map((issue, index) => (
-                    <tr key={`${issue.code}-${issue.productId}-${issue.variantId ?? "product"}-${index}`} className="hover:bg-slate-50">
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${severityClass(issue.severity)}`}>
-                          {issue.severity}
-                        </span>
+                  {hasIssues ? (
+                    report.issues.map((issue, index) => (
+                      <tr key={`${issue.code}-${issue.productId}-${issue.variantId ?? "product"}-${index}`} className="hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${severityClass(issue.severity)}`}>
+                            {issue.severity}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-medium">{issueLabels[issue.code]}</td>
+                        <td className="px-4 py-3">{issue.productName}</td>
+                        <td className="px-4 py-3 text-slate-500">{issue.variantLabel ?? "—"}</td>
+                        <td className="px-4 py-3 text-slate-600">{issue.message}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-10 text-center text-slate-500">
+                        {hasProducts ? "Sorun bulunmadı. CSV export yine de rapor arşivi için kullanılabilir." : "Aktif ürün bulunamadı. ikas ürün kataloğuna ürün eklendiğinde bu tablo dolacak."}
                       </td>
-                      <td className="px-4 py-3 font-medium">{issueLabels[issue.code]}</td>
-                      <td className="px-4 py-3">{issue.productName}</td>
-                      <td className="px-4 py-3 text-slate-500">{issue.variantLabel ?? "—"}</td>
-                      <td className="px-4 py-3 text-slate-600">{issue.message}</td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
@@ -134,17 +155,23 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
         </section>
 
         <section id="low-stock-cta" className="rounded-3xl border border-emerald-300/30 bg-emerald-300/10 p-7">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-200">Paid MVP hook</p>
               <h2 className="mt-2 text-2xl font-bold text-white">{report.lowStockRiskCount} stok riski bulundu</h2>
               <p className="mt-2 max-w-3xl text-slate-300">
-                Faz 2’de bu blok “Günlük Low Stock Alert’i aç” CTA’sına bağlanacak. Payment ve email lifecycle doğrulanmadan aktif edilmeyecek.
+                Faz 2 için ödeme veya cron eklemeden önce merchant intent ölçüyoruz. Bu buton şimdilik sadece talep toplama placeholder’ı;
+                ürün, stok veya ödeme datasını değiştirmez.
               </p>
+              <ul className="mt-4 grid gap-2 text-sm text-emerald-50/90 md:grid-cols-3">
+                <li className="rounded-2xl bg-slate-950/40 px-3 py-2 ring-1 ring-white/10">Günlük stok özeti</li>
+                <li className="rounded-2xl bg-slate-950/40 px-3 py-2 ring-1 ring-white/10">Eşik bazlı uyarı</li>
+                <li className="rounded-2xl bg-slate-950/40 px-3 py-2 ring-1 ring-white/10">Email/Slack bildirimi</li>
+              </ul>
             </div>
-            <button className="rounded-full bg-white px-5 py-3 text-sm font-bold text-slate-950 opacity-60" disabled>
-              Yakında: uyarıları aç
-            </button>
+            <a className="rounded-full bg-white px-5 py-3 text-center text-sm font-bold text-slate-950 transition hover:bg-emerald-100" href={lowStockIntentHref}>
+              İlgimi çekti
+            </a>
           </div>
         </section>
       </section>
