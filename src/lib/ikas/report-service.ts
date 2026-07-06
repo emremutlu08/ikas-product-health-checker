@@ -2,7 +2,7 @@ import { issuesToCsv } from "./csv";
 import { buildHealthReport } from "./health-rules";
 import { config } from "@/globals/config";
 import { getSession } from "@/lib/session";
-import { getIkasToken } from "./token-store";
+import { getIkasToken, invalidateIkasToken } from "./token-store";
 import { createProductAdapter, HttpIkasProductAdapter } from "./product-adapter";
 import type { HealthReport } from "./types";
 
@@ -18,8 +18,16 @@ export async function getProductHealthReport(now = new Date(), authorizedAppId?:
   const adapter = liveToken
     ? new HttpIkasProductAdapter(config.graphApiUrl, liveToken)
     : createProductAdapter();
-  const { source, products } = await adapter.listProducts();
-  return { source, report: buildHealthReport(products, now) };
+  try {
+    const { source, products } = await adapter.listProducts();
+    return { source, report: buildHealthReport(products, now) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (authorizedAppId && message.includes("LOGIN_REQUIRED")) {
+      await invalidateIkasToken(authorizedAppId);
+    }
+    throw error;
+  }
 }
 
 export async function getProductHealthReportCsv(authorizedAppId?: string | null) {
