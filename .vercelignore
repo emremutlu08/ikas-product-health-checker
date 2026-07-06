@@ -1,0 +1,10 @@
+# Keep local secrets/runtime state out of Vercel uploads
+.env
+.env.*
+!.env.example
+.ikas/
+.ikas-runtime-tokens.json
+.DS_Store
+node_modules/
+.next/
+coverage/
