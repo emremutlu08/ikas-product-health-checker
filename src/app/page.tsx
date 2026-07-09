@@ -1,10 +1,10 @@
 import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
 import { getSession } from "@/lib/session";
 import { getIkasToken } from "@/lib/ikas/token-store";
-import { redirect } from "next/navigation";
 import { getProductHealthReport } from "@/lib/ikas/report-service";
 import { ProductImagePreview } from "@/components/ProductImagePreview";
 import type { MistakeRuleCode } from "@/lib/ikas/types";
+import { normalizeStoreNameInput } from "@/lib/ikas/store-name";
 
 function formatDate(value?: string) {
   if (!value) return "—";
@@ -24,6 +24,17 @@ function appendRuleToHref(baseHref: string, rule?: string) {
   return `${baseHref}${baseHref.includes("?") ? "&" : "?"}rule=${encodeURIComponent(rule)}`;
 }
 
+function isLiveAuthRequiredError(message: string) {
+  return message.includes("LOGIN_REQUIRED") || message.includes("IKAS_LIVE_AUTH_REQUIRED");
+}
+
+function authorizeStoreHref(storeName?: string) {
+  const params = new URLSearchParams();
+  if (storeName) params.set("storeName", storeName);
+  const query = params.toString();
+  return query ? `/authorize-store?${query}` : "/authorize-store";
+}
+
 export default async function Home({
   searchParams,
 }: {
@@ -32,14 +43,12 @@ export default async function Home({
   const params = (await searchParams) ?? {};
   const session = await getSession().catch(() => undefined);
   const storedToken = await getIkasToken(params.authorizedAppId);
-  const effectiveStoreName = params.storeName ?? storedToken?.storeName ?? session?.storeName;
+  const requestStoreName = normalizeStoreNameInput(params.storeName);
+  const effectiveStoreName = requestStoreName || storedToken?.storeName || session?.storeName;
+  const hasUsableLiveToken = params.authorizedAppId ? Boolean(storedToken?.accessToken) : Boolean(session?.accessToken);
 
-  if (!storedToken?.accessToken && params.authorizedAppId && params.storeName && params.oauth !== "skip") {
-    redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
-  }
-
-  if (!storedToken?.accessToken && !session?.accessToken && params.storeName && params.oauth !== "skip") {
-    redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(params.storeName)}`);
+  if (!hasUsableLiveToken) {
+    return <SetupRequiredScreen storeName={effectiveStoreName} />;
   }
 
   let reportResult: Awaited<ReturnType<typeof getProductHealthReport>>;
@@ -47,11 +56,8 @@ export default async function Home({
     reportResult = await getProductHealthReport(new Date(), params.authorizedAppId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (effectiveStoreName && (message.includes("LOGIN_REQUIRED") || message.includes("IKAS_LIVE_AUTH_REQUIRED")) && params.oauth !== "skip") {
-      redirect(`/api/oauth/authorize/ikas?storeName=${encodeURIComponent(effectiveStoreName)}`);
-    }
-    if (message.includes("IKAS_LIVE_AUTH_REQUIRED") && !effectiveStoreName) {
-      redirect("/authorize-store");
+    if (isLiveAuthRequiredError(message)) {
+      return <SetupRequiredScreen expired storeName={effectiveStoreName} />;
     }
     throw error;
   }
@@ -222,6 +228,43 @@ export default async function Home({
             </a>
           </div>
         </section>
+      </section>
+    </main>
+  );
+}
+
+function SetupRequiredScreen({ expired = false, storeName }: { expired?: boolean; storeName?: string }) {
+  const setupHref = authorizeStoreHref(storeName);
+
+  return (
+    <main className="min-h-screen bg-[#f6f6f7] text-[#202223]">
+      <IkasAppBridgeReady />
+      <section className="mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-10 sm:px-6">
+        <div className="w-full rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">ikas Ürün Sağlığı</p>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">
+            {expired ? "Mağaza bağlantısını yenile" : "Kurulumu tamamla"}
+          </h1>
+          <p className="mt-3 text-base leading-7 text-slate-600">
+            Bu ekran canlı ikas yetkisi olmadan rapor göstermiyor. Devam etmek için mağazanı ikas yetkilendirmesiyle bağla; uygulama yalnızca ürün ve stok bilgilerini okuma izni ister.
+          </p>
+          <div className="mt-5 rounded-2xl bg-blue-50 p-4 text-sm leading-6 text-blue-950 ring-1 ring-blue-100">
+            <p className="font-semibold">Mağaza adı formatı</p>
+            <p className="mt-1">
+              ikas admin adresin <strong>{"{storeName}.myikas.com/admin"}</strong> ise bağlantı ekranında yalnızca <strong>{"{storeName}"}</strong> yaz. Örneğin{" "}
+              <strong>foo.myikas.com/admin</strong> için <strong>foo</strong> girilir.
+            </p>
+          </div>
+          {storeName ? <p className="mt-4 text-sm text-slate-500">Algılanan mağaza adı: {storeName}</p> : null}
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <a className="rounded-xl bg-orange-500 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-600" href={setupHref}>
+              {expired ? "Bağlantıyı yenile" : "Kurulumu tamamla"}
+            </a>
+            <a className="rounded-xl bg-slate-100 px-5 py-3 text-center text-sm font-bold text-slate-700 transition hover:bg-slate-200" href="/authorize-store">
+              Mağaza adını elle gir
+            </a>
+          </div>
+        </div>
       </section>
     </main>
   );

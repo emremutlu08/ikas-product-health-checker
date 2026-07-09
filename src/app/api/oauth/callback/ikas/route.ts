@@ -2,6 +2,7 @@ import { config } from "@/globals/config";
 import { getRedirectUri, getRequestBaseUrl, requireOAuthConfig } from "@/helpers/api-helpers";
 import { getSession } from "@/lib/session";
 import { saveIkasToken } from "@/lib/ikas/token-store";
+import { normalizeStoreNameInput } from "@/lib/ikas/store-name";
 import { validateRequest } from "@/lib/validation";
 import { OAuthAPI } from "@ikas/admin-api-client";
 import { NextRequest, NextResponse } from "next/server";
@@ -13,7 +14,17 @@ const callbackSchema = z.object({
   storeName: z.string().optional(),
 });
 
+function failRedirect(request: NextRequest, storeName?: string) {
+  const failUrl = new URL("/authorize-store", getRequestBaseUrl(request));
+  failUrl.searchParams.set("status", "fail");
+  const normalizedStoreName = normalizeStoreNameInput(storeName);
+  if (normalizedStoreName) failUrl.searchParams.set("storeName", normalizedStoreName);
+  return NextResponse.redirect(failUrl);
+}
+
 export async function GET(request: NextRequest) {
+  let attemptedStoreName = normalizeStoreNameInput(request.nextUrl.searchParams.get("storeName"));
+
   try {
     requireOAuthConfig();
     const url = new URL(request.url);
@@ -22,11 +33,12 @@ export async function GET(request: NextRequest) {
       state: url.searchParams.get("state") ?? undefined,
       storeName: url.searchParams.get("storeName") ?? undefined,
     });
-    if (!validation.success) return NextResponse.json({ error: validation.error }, { status: 400 });
+    if (!validation.success) return failRedirect(request, attemptedStoreName);
 
     const session = await getSession();
+    attemptedStoreName = normalizeStoreNameInput(validation.data.storeName || session.storeName);
     if (validation.data.state && session.state && validation.data.state !== session.state) {
-      return NextResponse.json({ error: "Invalid OAuth state" }, { status: 400 });
+      return failRedirect(request, attemptedStoreName);
     }
 
     const tokenResponse = await OAuthAPI.getTokenWithAuthorizationCode(
@@ -36,13 +48,12 @@ export async function GET(request: NextRequest) {
         client_secret: config.oauth.clientSecret!,
         redirect_uri: getRedirectUri(request.headers.get("host")!),
       },
-      { storeName: validation.data.storeName || session.storeName || "api" },
+      { storeName: attemptedStoreName || "api" },
     );
 
     if (!tokenResponse.data?.access_token) {
-      return NextResponse.json({ error: "Failed to retrieve ikas access token" }, { status: 500 });
+      return failRedirect(request, attemptedStoreName);
     }
-
 
     const contextResponse = await fetch(config.graphApiUrl, {
       method: "POST",
@@ -59,7 +70,7 @@ export async function GET(request: NextRequest) {
     const contextPayload = await contextResponse.json();
     const authorizedAppId = contextPayload?.data?.getAuthorizedApp?.id;
     const merchantId = contextPayload?.data?.getMerchant?.id;
-    const storeName = contextPayload?.data?.getMerchant?.storeName || validation.data.storeName || session.storeName;
+    const storeName = normalizeStoreNameInput(contextPayload?.data?.getMerchant?.storeName || attemptedStoreName);
 
     if (authorizedAppId) {
       await saveIkasToken({
@@ -88,6 +99,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   } catch (error) {
     console.error("ikas OAuth callback error", error);
-    return NextResponse.redirect(`${getRequestBaseUrl(request)}/authorize-store?status=fail`);
+    return failRedirect(request, attemptedStoreName);
   }
 }
