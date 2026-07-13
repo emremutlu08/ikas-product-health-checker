@@ -2,12 +2,43 @@ import { describe, expect, it, vi } from "vitest";
 import {
   clearSessionData,
   consumeOAuthStateSession,
+  getSessionCookieConfig,
   readInstallationSession,
   saveInstallationSession,
   saveOAuthStateSession,
   saveSanitizedSession,
   type SessionHandle,
 } from "./session";
+
+describe("session cookie configuration", () => {
+  it("uses embedded production attributes and keeps the existing TTL", () => {
+    expect(getSessionCookieConfig("production")).toEqual({
+      ttl: 8 * 60 * 60,
+      cookieOptions: {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+        path: "/",
+        partitioned: true,
+      },
+    });
+  });
+
+  it("keeps development cookies compatible without partitioning", () => {
+    const config = getSessionCookieConfig("development");
+
+    expect(config).toEqual({
+      ttl: 8 * 60 * 60,
+      cookieOptions: {
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+        path: "/",
+      },
+    });
+    expect(config.cookieOptions).not.toHaveProperty("partitioned");
+  });
+});
 
 function createSession(values: Record<string, unknown> = {}) {
   return {
