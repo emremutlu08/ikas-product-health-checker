@@ -1,25 +1,26 @@
 # Live ikas Gate
 
-This project is ready for mock-mode development. Live ikas integration is blocked until CLI/OAuth login and a test store are available.
+The runtime dashboard is hard-gated on a durable ikas OAuth token and uses live `listProduct` data only. Mock product data remains test/development fixture code and is not a report fallback.
 
 ## Current local verification
 
 - `pnpm test` passes.
 - `pnpm lint` passes.
 - `pnpm build` passes.
-- `/` renders the report from `MockIkasProductAdapter`.
-- `/api/report` returns report JSON.
-- `/api/report.csv` returns CSV.
+- `/` shows setup until a signed launch or verified OAuth callback establishes a tenant-bound installation session.
+- `/api/report` returns live report JSON only for that HttpOnly session.
+- `/api/report.csv` returns a live CSV only for that HttpOnly session.
 
-## Live mode env contract
+## Production token-store env contract
 
-```bash
-IKAS_PRODUCT_ADAPTER=http
-IKAS_GRAPHQL_ENDPOINT=<real ikas GraphQL endpoint>
-IKAS_ADMIN_API_TOKEN=<test store token>
+```text
+UPSTASH_REDIS_REST_URL
+UPSTASH_REDIS_REST_TOKEN
 ```
 
-Do not commit real tokens. Use local env files only.
+Both values must be configured together as server-only Vercel Production variables. Do not commit or print them. A redeploy is required after linking the Marketplace store.
+
+Set `NEXT_PUBLIC_DEPLOY_URL` to the exact production HTTPS origin. Paths, queries, fragments, userinfo, backslashes, and control characters are rejected. OAuth URL construction never trusts incoming host or forwarded-host headers; non-production HTTP is limited to explicit loopback origins.
 
 ## ikas CLI gate
 
@@ -63,7 +64,11 @@ The app now includes minimal ikas OAuth routes:
 - `/api/oauth/authorize/ikas`
 - `/api/oauth/callback/ikas`
 
-After OAuth succeeds, the server stores the access token in an encrypted iron-session cookie and `/api/report` uses live `listProduct` through `HttpIkasProductAdapter`.
+After OAuth state validation, token exchange, and app-context validation succeed, the server stores the access/refresh token in the configured `TokenStore` under an internal installation key. Success requires a durable write and read-back. The resulting iron-session cookie contains only tenant identifiers; it never contains OAuth tokens.
+
+Production requires `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`. The legacy `KV_REST_API_URL` + `KV_REST_API_TOKEN` pair is accepted only for migrated Vercel KV projects. Production never uses `.ikas-runtime-tokens.json` or memory storage.
+
+Concurrent refreshes are coordinated by a per-installation Redis lease with a monotonic fence. The winner and waiters re-read the durable record, and refresh writes, invalid-grant deletion, and safe release require the current owner/fence so a stale request cannot destroy a newer rotated token.
 
 
 ## Live validation completed — 2026-07-06
@@ -76,8 +81,8 @@ Observed working flow:
 2. merchant selected: `dev-emremutlu`
 3. Cloudflare tunnel created by ikas CLI
 4. OAuth callback reached `/api/oauth/callback/ikas`
-5. token persisted locally by `authorizedAppId` in `.ikas-runtime-tokens.json` (gitignored)
-6. root launch URL with `authorizedAppId` reads live products through `HttpIkasProductAdapter`
+5. token persisted locally under its internal installation key in `.ikas-runtime-tokens.json` (gitignored development-only validation)
+6. the validated HttpOnly installation session reads live products through `HttpIkasProductAdapter`
 7. UI shows `Data source: live ikas GraphQL`
 
 Verified live sample:
@@ -92,7 +97,8 @@ Known non-blocking dev noise:
 
 - `/_next/webpack-hmr` WebSocket can fail over the Cloudflare tunnel in dev mode.
 - `cdn.myikas.com/images/<clientId>/null/image_360.webp` returns 404 until the Partner app has a real uploaded image/logo.
-- `authorized-app/<authorizedAppId>` can show ikas admin shell 404 when opened directly; use the app-store launch link or current tunnel URL instead.
+
+Uninstall cleanup remains a follow-up until this repository contains a confirmed ikas uninstall event and signature contract. No speculative webhook should be deployed.
 
 Current rule: live report is read-only. Do not add product, stock, price, or payment mutations to V1.
 

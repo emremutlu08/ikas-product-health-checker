@@ -1,16 +1,19 @@
 "use client";
 
+import { OAUTH_FAILURE_MESSAGES, type OAuthFailureReason } from "@/lib/ikas/oauth-failure";
 import { normalizeStoreNameInput } from "@/lib/ikas/store-name";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
 type AuthorizeStoreFormProps = {
   initialStoreName: string;
-  failed: boolean;
+  failureReason?: OAuthFailureReason;
+  supportId: string;
 };
 
-export function AuthorizeStoreForm({ initialStoreName, failed }: AuthorizeStoreFormProps) {
+export function AuthorizeStoreForm({ initialStoreName, failureReason, supportId }: AuthorizeStoreFormProps) {
   const [storeName, setStoreName] = useState(initialStoreName);
+  const failureMessage = failureReason ? OAUTH_FAILURE_MESSAGES[failureReason] : undefined;
 
   function polishStoreName() {
     const normalized = normalizeStoreNameInput(storeName);
@@ -52,14 +55,16 @@ export function AuthorizeStoreForm({ initialStoreName, failed }: AuthorizeStoreF
         placeholder="foo"
       />
 
-      {failed ? (
+      {failureMessage ? (
         <div className="mt-4 rounded-2xl border border-red-300/30 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
-          <p className="font-semibold text-red-50">ikas yetkilendirmesi tamamlanamadı.</p>
-          <p className="mt-1">
-            Mağaza adını kontrol edip tekrar dene. Alan adı veya admin adresinin tamamını yapıştırdıysan sorun değil; gönderirken{" "}
-            <strong className="font-semibold">foo.myikas.com/admin</strong> değeri <strong className="font-semibold">foo</strong> olarak düzenlenir.
-          </p>
-          <p className="mt-1">Devam edemezsen ikas admin panelindeki mağaza alt alan adını kopyalayıp bu alana yalnızca o kısmı yaz.</p>
+          <p className="font-semibold text-red-50">{failureMessage.title}</p>
+          <p className="mt-1">{failureMessage.detail}</p>
+          <p className="mt-1">{failureMessage.action}</p>
+          {supportId ? (
+            <p className="mt-3 rounded-xl bg-slate-950/40 px-3 py-2 font-mono text-xs text-red-50">
+              Destek kodu: {supportId}
+            </p>
+          ) : null}
         </div>
       ) : null}
 

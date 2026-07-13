@@ -1,10 +1,13 @@
 import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
-import { getSession } from "@/lib/session";
-import { getIkasToken } from "@/lib/ikas/token-store";
 import { getProductHealthReport } from "@/lib/ikas/report-service";
 import { ProductImagePreview } from "@/components/ProductImagePreview";
+import { IkasAuthenticationError } from "@/lib/ikas/errors";
 import type { MistakeRuleCode } from "@/lib/ikas/types";
-import { normalizeStoreNameInput } from "@/lib/ikas/store-name";
+import { getIkasLaunchAuthenticationHref } from "@/lib/ikas/installation-auth";
+import { getSession, readInstallationSession } from "@/lib/session";
+import { redirect } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 
 function formatDate(value?: string) {
   if (!value) return "—";
@@ -24,10 +27,6 @@ function appendRuleToHref(baseHref: string, rule?: string) {
   return `${baseHref}${baseHref.includes("?") ? "&" : "?"}rule=${encodeURIComponent(rule)}`;
 }
 
-function isLiveAuthRequiredError(message: string) {
-  return message.includes("LOGIN_REQUIRED") || message.includes("IKAS_LIVE_AUTH_REQUIRED");
-}
-
 function authorizeStoreHref(storeName?: string) {
   const params = new URLSearchParams();
   if (storeName) params.set("storeName", storeName);
@@ -38,45 +37,40 @@ function authorizeStoreHref(storeName?: string) {
 export default async function Home({
   searchParams,
 }: {
-  searchParams?: Promise<{ storeName?: string; authorizedAppId?: string; oauth?: string; rule?: MistakeRuleCode }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = (await searchParams) ?? {};
-  const session = await getSession().catch(() => undefined);
-  const storedToken = await getIkasToken(params.authorizedAppId);
-  const requestStoreName = normalizeStoreNameInput(params.storeName);
-  const effectiveStoreName = requestStoreName || storedToken?.storeName || session?.storeName;
-  const hasUsableLiveToken = params.authorizedAppId ? Boolean(storedToken?.accessToken) : Boolean(session?.accessToken);
+  const launchAuthenticationHref = getIkasLaunchAuthenticationHref(params);
+  if (launchAuthenticationHref) redirect(launchAuthenticationHref);
 
-  if (!hasUsableLiveToken) {
+  const installation = readInstallationSession(await getSession());
+  const effectiveStoreName = installation?.storeName;
+
+  if (!installation) {
     return <SetupRequiredScreen storeName={effectiveStoreName} />;
   }
 
   let reportResult: Awaited<ReturnType<typeof getProductHealthReport>>;
   try {
-    reportResult = await getProductHealthReport(new Date(), params.authorizedAppId);
+    reportResult = await getProductHealthReport(new Date(), installation);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (isLiveAuthRequiredError(message)) {
+    if (error instanceof IkasAuthenticationError) {
       return <SetupRequiredScreen expired storeName={effectiveStoreName} />;
     }
     throw error;
   }
 
   const { report } = reportResult;
-  const selectedRule = params.rule;
-  const csvHref = params.authorizedAppId ? `/api/report.csv?authorizedAppId=${encodeURIComponent(params.authorizedAppId)}` : "/api/report.csv";
+  const selectedRule = typeof params.rule === "string" ? (params.rule as MistakeRuleCode) : undefined;
+  const csvHref = "/api/report.csv";
   const selectedRuleLabel = selectedRule ? report.ruleSummaries.find((rule) => rule.code === selectedRule)?.label : undefined;
   const productRows = selectedRuleLabel
     ? report.productRows.filter((row) => row.mistakes.includes(selectedRuleLabel))
     : report.productRows;
-  const launchQuery = new URLSearchParams();
-  if (effectiveStoreName) launchQuery.set("storeName", effectiveStoreName);
-  if (params.authorizedAppId) launchQuery.set("authorizedAppId", params.authorizedAppId);
-  launchQuery.set("oauth", "skip");
-  const baseDashboardHref = `/?${launchQuery.toString()}`;
+  const baseDashboardHref = "/";
   const scanStatus = report.scanStatus === "success" ? "Başarılı" : "Sırada";
   const lowStockIntentHref = `mailto:mutluemre93@gmail.com?subject=${encodeURIComponent("Stok uyarısı ilgimi çekti")}&body=${encodeURIComponent(
-    `Mağaza: ${effectiveStoreName ?? "bilinmiyor"}\nMevcut stok riskleri: ${report.lowStockRiskCount}\nYetkili uygulama: ${params.authorizedAppId ?? "bilinmiyor"}`,
+    `Mağaza: ${effectiveStoreName ?? "bilinmiyor"}\nMevcut stok riskleri: ${report.lowStockRiskCount}`,
   )}`;
 
   return (

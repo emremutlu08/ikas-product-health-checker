@@ -1,104 +1,87 @@
 import { config } from "@/globals/config";
-import { getRedirectUri, getRequestBaseUrl, requireOAuthConfig } from "@/helpers/api-helpers";
-import { getSession } from "@/lib/session";
+import { getCanonicalAppOrigin, getRedirectUri, requireOAuthConfig } from "@/helpers/api-helpers";
+import { processIkasOAuthCallback } from "@/lib/ikas/oauth-callback";
+import type { OAuthFailureReason } from "@/lib/ikas/oauth-failure";
+import { isValidStoreName } from "@/lib/ikas/store-name";
 import { saveIkasToken } from "@/lib/ikas/token-store";
-import { normalizeStoreNameInput } from "@/lib/ikas/store-name";
-import { validateRequest } from "@/lib/validation";
+import { getSession } from "@/lib/session";
 import { OAuthAPI } from "@ikas/admin-api-client";
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { type NextRequest, NextResponse } from "next/server";
 
-const callbackSchema = z.object({
-  code: z.string().min(1),
-  state: z.string().optional(),
-  storeName: z.string().optional(),
-});
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-function failRedirect(request: NextRequest, storeName?: string) {
-  const failUrl = new URL("/authorize-store", getRequestBaseUrl(request));
+function redirectWithoutCaching(url: URL) {
+  const response = NextResponse.redirect(url);
+  response.headers.set("cache-control", "no-store");
+  return response;
+}
+
+function failRedirect(
+  reason: OAuthFailureReason,
+  errorId: string,
+  storeName?: string | null,
+) {
+  const failUrl = new URL("/authorize-store", getCanonicalAppOrigin());
   failUrl.searchParams.set("status", "fail");
-  const normalizedStoreName = normalizeStoreNameInput(storeName);
-  if (normalizedStoreName) failUrl.searchParams.set("storeName", normalizedStoreName);
-  return NextResponse.redirect(failUrl);
+  failUrl.searchParams.set("reason", reason);
+  failUrl.searchParams.set("errorId", errorId);
+  if (storeName && isValidStoreName(storeName)) failUrl.searchParams.set("storeName", storeName);
+  return redirectWithoutCaching(failUrl);
 }
 
 export async function GET(request: NextRequest) {
-  let attemptedStoreName = normalizeStoreNameInput(request.nextUrl.searchParams.get("storeName"));
-
-  try {
-    requireOAuthConfig();
-    const url = new URL(request.url);
-    const validation = validateRequest(callbackSchema, {
-      code: url.searchParams.get("code"),
-      state: url.searchParams.get("state") ?? undefined,
-      storeName: url.searchParams.get("storeName") ?? undefined,
-    });
-    if (!validation.success) return failRedirect(request, attemptedStoreName);
-
-    const session = await getSession();
-    attemptedStoreName = normalizeStoreNameInput(validation.data.storeName || session.storeName);
-    if (validation.data.state && session.state && validation.data.state !== session.state) {
-      return failRedirect(request, attemptedStoreName);
-    }
-
-    const tokenResponse = await OAuthAPI.getTokenWithAuthorizationCode(
-      {
-        code: validation.data.code,
-        client_id: config.oauth.clientId!,
-        client_secret: config.oauth.clientSecret!,
-        redirect_uri: getRedirectUri(request.headers.get("host")!),
+  const result = await processIkasOAuthCallback(
+    {
+      code: request.nextUrl.searchParams.get("code"),
+      state: request.nextUrl.searchParams.get("state"),
+      storeName: request.nextUrl.searchParams.get("storeName"),
+      redirectUri: getRedirectUri(),
+      successBaseUrl: getCanonicalAppOrigin(),
+    },
+    {
+      getOAuthConfig() {
+        requireOAuthConfig();
+        return {
+          clientId: config.oauth.clientId!,
+          clientSecret: config.oauth.clientSecret!,
+        };
       },
-      { storeName: attemptedStoreName || "api" },
-    );
-
-    if (!tokenResponse.data?.access_token) {
-      return failRedirect(request, attemptedStoreName);
-    }
-
-    const contextResponse = await fetch(config.graphApiUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${tokenResponse.data.access_token}`,
+      getSession,
+      async exchangeToken({ code, clientId, clientSecret, redirectUri, storeName }) {
+        if (!isValidStoreName(storeName)) throw new Error("Invalid OAuth store name");
+        const response = await OAuthAPI.getTokenWithAuthorizationCode(
+          {
+            code,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: redirectUri,
+          },
+          { storeName },
+        );
+        return { ok: response.ok, status: response.status, data: response.data as unknown };
       },
-      body: JSON.stringify({
-        query: `query getIkasAppContext { getMerchant { id storeName } getAuthorizedApp { id } }`,
-      }),
-      cache: "no-store",
-    });
+      queryAppContext(accessToken) {
+        return fetch(config.graphApiUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            query: `query getIkasAppContext { getMerchant { id storeName } getAuthorizedApp { id } }`,
+          }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
+        });
+      },
+      persistToken: saveIkasToken,
+    },
+  );
 
-    const contextPayload = await contextResponse.json();
-    const authorizedAppId = contextPayload?.data?.getAuthorizedApp?.id;
-    const merchantId = contextPayload?.data?.getMerchant?.id;
-    const storeName = normalizeStoreNameInput(contextPayload?.data?.getMerchant?.storeName || attemptedStoreName);
-
-    if (authorizedAppId) {
-      await saveIkasToken({
-        authorizedAppId,
-        merchantId,
-        storeName,
-        accessToken: tokenResponse.data.access_token,
-        refreshToken: tokenResponse.data.refresh_token,
-        tokenType: tokenResponse.data.token_type,
-        expiresAt: Date.now() + tokenResponse.data.expires_in * 1000,
-      });
-    }
-
-    session.accessToken = tokenResponse.data.access_token;
-    session.refreshToken = tokenResponse.data.refresh_token;
-    session.tokenType = tokenResponse.data.token_type;
-    session.expiresAt = Date.now() + tokenResponse.data.expires_in * 1000;
-    await session.save();
-
-    const redirectUrl = new URL(getRequestBaseUrl(request));
-    redirectUrl.searchParams.set("source", "ikas");
-    if (storeName) redirectUrl.searchParams.set("storeName", storeName);
-    if (authorizedAppId) redirectUrl.searchParams.set("authorizedAppId", authorizedAppId);
-    redirectUrl.searchParams.set("oauth", "skip");
-
-    return NextResponse.redirect(redirectUrl);
-  } catch (error) {
-    console.error("ikas OAuth callback error", error);
-    return failRedirect(request, attemptedStoreName);
+  if (!result.ok) {
+    return failRedirect(result.reason, result.errorId, result.storeName);
   }
+
+  return redirectWithoutCaching(result.redirectUrl);
 }

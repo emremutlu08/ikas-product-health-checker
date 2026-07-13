@@ -1,4 +1,5 @@
 import { sampleProducts } from "./sample-products";
+import { IkasAuthenticationError, IkasUpstreamError } from "./errors";
 import type { IkasProduct } from "./types";
 
 export type ProductAdapterMode = "mock" | "http";
@@ -61,8 +62,11 @@ const LIST_PRODUCT_QUERY = /* GraphQL */ `
 
 type GraphQlResponse<T> = {
   data?: T;
-  errors?: Array<{ message: string }>;
+  errors?: Array<{ message?: string; extensions?: { code?: string } }>;
 };
+
+const AUTHENTICATION_GRAPHQL_CODES = new Set(["UNAUTHENTICATED", "LOGIN_REQUIRED"]);
+export const PRODUCT_GRAPHQL_TIMEOUT_MS = 15_000;
 
 type ListProductResponse = {
   listProduct: {
@@ -78,6 +82,8 @@ export class HttpIkasProductAdapter implements IkasProductAdapter {
     private readonly endpoint: string,
     private readonly token: string,
     private readonly pageLimit = 200,
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly timeoutMs = PRODUCT_GRAPHQL_TIMEOUT_MS,
   ) {}
 
   async listProducts(): Promise<ProductAdapterResult> {
@@ -86,30 +92,44 @@ export class HttpIkasProductAdapter implements IkasProductAdapter {
     let hasNext = true;
 
     while (hasNext) {
-      const response = await fetch(this.endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.token}`,
-        },
-        body: JSON.stringify({
-          query: LIST_PRODUCT_QUERY,
-          variables: { pagination: { page, limit: this.pageLimit } },
-        }),
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error(`ikas GraphQL request failed with HTTP ${response.status}`);
+      let response: Response;
+      try {
+        response = await this.fetchImpl(this.endpoint, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.token}`,
+          },
+          body: JSON.stringify({
+            query: LIST_PRODUCT_QUERY,
+            variables: { pagination: { page, limit: this.pageLimit } },
+          }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch {
+        throw new IkasUpstreamError("IKAS_UPSTREAM_HTTP_ERROR");
       }
 
-      const payload = (await response.json()) as GraphQlResponse<ListProductResponse>;
+      if (response.status === 401) throw new IkasAuthenticationError("IKAS_AUTHENTICATION_FAILED");
+      if (!response.ok) throw new IkasUpstreamError("IKAS_UPSTREAM_HTTP_ERROR");
+
+      let payload: GraphQlResponse<ListProductResponse>;
+      try {
+        payload = (await response.json()) as GraphQlResponse<ListProductResponse>;
+      } catch {
+        throw new IkasUpstreamError("IKAS_UPSTREAM_INVALID_RESPONSE");
+      }
       if (payload.errors?.length) {
-        throw new Error(`ikas GraphQL error: ${payload.errors.map((error) => error.message).join("; ")}`);
+        const hasAuthenticationError = payload.errors.some((error) =>
+          error.extensions?.code ? AUTHENTICATION_GRAPHQL_CODES.has(error.extensions.code) : false,
+        );
+        if (hasAuthenticationError) throw new IkasAuthenticationError("IKAS_AUTHENTICATION_FAILED");
+        throw new IkasUpstreamError("IKAS_UPSTREAM_GRAPHQL_ERROR");
       }
 
       if (!payload.data?.listProduct) {
-        throw new Error("ikas GraphQL response did not include listProduct data");
+        throw new IkasUpstreamError("IKAS_UPSTREAM_INVALID_RESPONSE");
       }
 
       products.push(...payload.data.listProduct.data);
@@ -119,21 +139,4 @@ export class HttpIkasProductAdapter implements IkasProductAdapter {
 
     return { source: "http", products };
   }
-}
-
-export function createProductAdapter(): IkasProductAdapter {
-  const mode = process.env.IKAS_PRODUCT_ADAPTER ?? "mock";
-
-  if (mode === "http") {
-    const endpoint = process.env.IKAS_GRAPHQL_ENDPOINT;
-    const token = process.env.IKAS_ADMIN_API_TOKEN;
-
-    if (!endpoint || !token) {
-      throw new Error("IKAS_PRODUCT_ADAPTER=http requires IKAS_GRAPHQL_ENDPOINT and IKAS_ADMIN_API_TOKEN");
-    }
-
-    return new HttpIkasProductAdapter(endpoint, token);
-  }
-
-  return new MockIkasProductAdapter();
 }

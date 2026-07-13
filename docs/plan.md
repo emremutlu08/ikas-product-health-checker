@@ -20,14 +20,14 @@
 - Add dashboard with score, issue counts, issue table, and CTA.
 - Add unit tests for core rules.
 
-## Phase 2 — Next slice
+## Phase 2 — Completed adapter slice
 
 1. Add an `IkasProductAdapter` interface.
 2. Add `MockIkasProductAdapter` using the sample data.
 3. Add `HttpIkasProductAdapter` skeleton that documents the GraphQL query but requires token/config before runtime use.
 4. Add API route `/api/report` returning report JSON from the adapter.
 5. Add `/api/report.csv` returning CSV.
-6. Keep the UI on mock data until test-store auth is available.
+6. Keep mock data as a test fixture until test-store auth is available.
 
 ## Phase 3 — Live ikas gate
 
@@ -53,12 +53,4 @@ The UI now reads through `getProductHealthReport()` instead of importing sample 
 - `src/app/api/report/route.ts` returns JSON report.
 - `src/app/api/report.csv/route.ts` returns CSV.
 
-Default mode is mock. Live mode is intentionally gated by env vars:
-
-```bash
-IKAS_PRODUCT_ADAPTER=http
-IKAS_GRAPHQL_ENDPOINT=<real endpoint>
-IKAS_ADMIN_API_TOKEN=<token>
-```
-
-Do not enable live mode until a test store/OAuth token is available.
+The runtime is now live-only: dashboard and report requests require a validated HttpOnly installation session whose tenant context matches a durable server-side OAuth record. `MockIkasProductAdapter` remains a test fixture and is never a runtime fallback. Production tokens come from the managed Redis-compatible REST store described in `docs/ikas-app-dev-workflow.md`; they are not supplied through a query parameter, static admin-token environment variable, or browser session.
