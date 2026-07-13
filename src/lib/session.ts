@@ -28,6 +28,17 @@ export type SessionHandle = SessionData & Pick<IronSession<SessionData>, "save">
 
 export const INSTALLATION_SESSION_TTL_SECONDS = 8 * 60 * 60;
 
+type SessionCookieConfig = {
+  ttl: number;
+  cookieOptions: {
+    httpOnly: true;
+    secure: boolean;
+    sameSite: "lax" | "none";
+    path: "/";
+    partitioned?: true;
+  };
+};
+
 const LEGACY_TOKEN_KEYS = ["accessToken", "refreshToken", "tokenType", "expiresAt"] as const;
 const SESSION_METHOD_KEYS = new Set(["save", "destroy", "updateConfig"]);
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
@@ -129,16 +140,25 @@ function cookiePassword() {
   return password;
 }
 
+export function getSessionCookieConfig(nodeEnv: string | undefined): SessionCookieConfig {
+  const isProduction = nodeEnv === "production";
+
+  return {
+    ttl: INSTALLATION_SESSION_TTL_SECONDS,
+    cookieOptions: {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+      path: "/",
+      ...(isProduction ? { partitioned: true } : {}),
+    },
+  };
+}
+
 export async function getSession() {
   return getIronSession<SessionData>(await cookies(), {
     password: cookiePassword(),
     cookieName: TOKEN_COOKIE,
-    ttl: INSTALLATION_SESSION_TTL_SECONDS,
-    cookieOptions: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-    },
+    ...getSessionCookieConfig(process.env.NODE_ENV),
   });
 }
