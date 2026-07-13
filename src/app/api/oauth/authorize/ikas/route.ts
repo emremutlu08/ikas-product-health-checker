@@ -2,6 +2,11 @@ import { config } from "@/globals/config";
 import { getCanonicalAppOrigin, getRedirectUri, requireOAuthConfig } from "@/helpers/api-helpers";
 import { getSession, saveOAuthStateSession } from "@/lib/session";
 import type { OAuthFailureReason } from "@/lib/ikas/oauth-failure";
+import {
+  generateOAuthState,
+  OAUTH_STATE_TTL_MS,
+  persistOAuthState,
+} from "@/lib/ikas/oauth-state-store";
 import { isValidStoreName, normalizeStoreNameInput } from "@/lib/ikas/store-name";
 import { validateRequest } from "@/lib/validation";
 import { OAuthAPI } from "@ikas/admin-api-client";
@@ -50,19 +55,24 @@ export async function GET(request: NextRequest) {
     const validation = validateRequest(authorizeSchema, { storeName: requestedStoreName });
     if (!validation.success) return failRedirect("invalid_store_name", errorId, requestedStoreName);
 
-    const state = crypto.randomUUID();
+    const storeName = validation.data.storeName;
+    const stateIssuedAt = Date.now();
+    const state = generateOAuthState(stateIssuedAt);
+    failureReason = "state_store_unavailable";
+    failureStage = "state_persist";
+    await persistOAuthState(state, { storeName, createdAt: stateIssuedAt }, OAUTH_STATE_TTL_MS);
+
     failureReason = "session_save_failed";
     failureStage = "session_save";
     const session = await getSession();
     await saveOAuthStateSession(session, {
       state,
-      stateIssuedAt: Date.now(),
-      storeName: validation.data.storeName,
+      stateIssuedAt,
+      storeName,
     });
 
     failureReason = "oauth_authorize_failed";
     failureStage = "oauth_authorize";
-    const storeName = validation.data.storeName;
     if (!isValidStoreName(storeName)) throw new Error("Invalid OAuth store name");
     const oauthBaseUrl = OAuthAPI.getOAuthUrl({ storeName });
     const authorizeUrl =

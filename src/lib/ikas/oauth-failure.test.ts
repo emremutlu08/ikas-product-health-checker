@@ -21,6 +21,17 @@ describe("OAuth failure presentation", () => {
     }
   });
 
+  it("describes unverifiable connection state without blaming a missing browser cookie", () => {
+    const message = OAUTH_FAILURE_MESSAGES.session_state_missing;
+    const copy = `${message.title} ${message.detail} ${message.action}`.toLocaleLowerCase("tr-TR");
+
+    expect(copy).toContain("bağlantı");
+    expect(copy).toContain("doğrulanamadı");
+    expect(copy).toContain("baştan başlat");
+    expect(copy).not.toContain("tarayıcı");
+    expect(copy).not.toContain("çerez");
+  });
+
   it("renders only server-generated UUID support IDs", () => {
     expect(normalizeOAuthSupportId("11111111-1111-4111-8111-111111111111")).toBe(
       "11111111-1111-4111-8111-111111111111",

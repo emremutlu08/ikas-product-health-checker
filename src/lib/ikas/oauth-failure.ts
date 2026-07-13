@@ -4,6 +4,10 @@ export const OAUTH_FAILURE_REASONS = [
   "oauth_authorize_failed",
   "callback_invalid",
   "state_missing",
+  "state_not_found",
+  "state_expired",
+  "state_replayed",
+  "state_store_unavailable",
   "session_state_missing",
   "state_mismatch",
   "token_exchange_failed",
@@ -53,10 +57,30 @@ export const OAUTH_FAILURE_MESSAGES: Record<OAuthFailureReason, OAuthFailureMess
     detail: "ikas dönüşünde zorunlu güvenlik durumu bulunamadı.",
     action: "Eski sekmeyi kapatıp mağaza bağlantısını yeniden başlat.",
   },
+  state_not_found: {
+    title: "Bağlantı oturumu doğrulanamadı.",
+    detail: "Mağaza bağlantısı için başlatılan güvenlik oturumu bulunamadı.",
+    action: "Bu sayfayı kapatıp mağaza bağlantısını baştan başlat.",
+  },
+  state_expired: {
+    title: "Bağlantı oturumunun süresi dolmuş.",
+    detail: "Mağaza bağlantısı için başlatılan güvenlik oturumu artık doğrulanamıyor.",
+    action: "Bu sayfayı kapatıp mağaza bağlantısını baştan başlat.",
+  },
+  state_replayed: {
+    title: "Bağlantı oturumu daha önce kullanılmış.",
+    detail: "Aynı yetkilendirme dönüşü güvenlik nedeniyle ikinci kez kabul edilmedi.",
+    action: "Bu sayfayı kapatıp mağaza bağlantısını baştan başlat.",
+  },
+  state_store_unavailable: {
+    title: "Bağlantı oturumu doğrulanamadı.",
+    detail: "Güvenli bağlantı oturumu sunucuda doğrulanamadığı için işlem durduruldu.",
+    action: "Mağaza bağlantısını baştan başlat; sorun sürerse destek kodunu paylaş.",
+  },
   session_state_missing: {
-    title: "Yetkilendirme oturumu sona ermiş.",
-    detail: "Başlangıç oturumu tarayıcıda artık bulunamıyor.",
-    action: "Çerezlere izin verip mağaza bağlantısını yeniden başlat.",
+    title: "Bağlantı oturumu doğrulanamadı.",
+    detail: "Mağaza bağlantısı için başlatılan güvenlik oturumu doğrulanamadı veya süresi doldu.",
+    action: "Bu sayfayı kapatıp mağaza bağlantısını baştan başlat.",
   },
   state_mismatch: {
     title: "Güvenlik doğrulaması eşleşmedi.",
@@ -99,9 +123,9 @@ export const OAUTH_FAILURE_MESSAGES: Record<OAuthFailureReason, OAuthFailureMess
     action: "Kısa süre sonra yeniden dene; sorun sürerse destek kodunu paylaş.",
   },
   session_save_failed: {
-    title: "Yetkilendirme oturumu tamamlanamadı.",
-    detail: "Kalıcı bağlantı oluşturuldu ancak tarayıcı oturumu güvenli biçimde kapatılamadı.",
-    action: "Çerezlere izin verip yeniden dene; sorun sürerse destek kodunu paylaş.",
+    title: "Bağlantı oturumu doğrulanamadı.",
+    detail: "Mağaza bağlantısı için gereken güvenli oturum tamamlanamadı.",
+    action: "Bu sayfayı kapatıp mağaza bağlantısını baştan başlat; sorun sürerse destek kodunu paylaş.",
   },
   unexpected_error: {
     title: "ikas yetkilendirmesi tamamlanamadı.",
