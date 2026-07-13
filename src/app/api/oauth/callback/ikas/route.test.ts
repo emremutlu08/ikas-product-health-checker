@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
+  consumeOAuthState: vi.fn(),
   getSession: vi.fn(),
   getTokenWithAuthorizationCode: vi.fn(),
   saveIkasToken: vi.fn(),
@@ -30,6 +31,11 @@ vi.mock("@/lib/session", async (importOriginal) => {
   return { ...actual, getSession: mocks.getSession };
 });
 
+vi.mock("@/lib/ikas/oauth-state-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ikas/oauth-state-store")>();
+  return { ...actual, consumeOAuthState: mocks.consumeOAuthState };
+});
+
 vi.mock("@/lib/ikas/token-store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ikas/token-store")>();
   return { ...actual, saveIkasToken: mocks.saveIkasToken };
@@ -37,11 +43,11 @@ vi.mock("@/lib/ikas/token-store", async (importOriginal) => {
 
 import { GET } from "./route";
 
-function createSession(storeName = "dev-emre2") {
+const STATE_CREATED_AT = Date.now() - 1_000;
+const OAUTH_STATE = `v1.${"A".repeat(43)}.${STATE_CREATED_AT.toString(36)}`;
+
+function createSession() {
   return {
-    state: "oauth-state",
-    stateIssuedAt: Date.now() - 1_000,
-    storeName,
     accessToken: "legacy-access-token",
     refreshToken: "legacy-refresh-token",
     save: vi.fn(async () => undefined),
@@ -51,6 +57,10 @@ function createSession(storeName = "dev-emre2") {
 describe("GET /api/oauth/callback/ikas", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.consumeOAuthState.mockResolvedValue({
+      status: "consumed",
+      record: { storeName: "dev-emre2", createdAt: STATE_CREATED_AT },
+    });
     mocks.getTokenWithAuthorizationCode.mockResolvedValue({
       ok: true,
       status: 200,
@@ -78,13 +88,13 @@ describe("GET /api/oauth/callback/ikas", () => {
     );
   });
 
-  it("exchanges only against the exact session store and returns a bare canonical redirect", async () => {
+  it("succeeds without cookie state and exchanges only against the consumed Redis store", async () => {
     const session = createSession();
     mocks.getSession.mockResolvedValue(session);
 
     const response = await GET(
       new NextRequest(
-        "https://attacker.invalid/api/oauth/callback/ikas?code=authorization-code&state=oauth-state&storeName=dev-emre2",
+        `https://attacker.invalid/api/oauth/callback/ikas?code=authorization-code&state=${OAUTH_STATE}&storeName=dev-emre2`,
         {
           headers: {
             host: "attacker.invalid",
@@ -104,6 +114,7 @@ describe("GET /api/oauth/callback/ikas", () => {
       },
       { storeName: "dev-emre2" },
     );
+    expect(mocks.consumeOAuthState).toHaveBeenCalledWith(OAUTH_STATE);
     expect(response.headers.get("location")).toBe("https://app.example.com/");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect({ ...session }).toEqual({
@@ -129,7 +140,7 @@ describe("GET /api/oauth/callback/ikas", () => {
 
     const response = await GET(
       new NextRequest(
-        `https://app.example.com/api/oauth/callback/ikas?code=authorization-code&state=oauth-state&storeName=${encodedStoreName}`,
+        `https://app.example.com/api/oauth/callback/ikas?code=authorization-code&state=${OAUTH_STATE}&storeName=${encodedStoreName}`,
       ),
     );
 
@@ -142,13 +153,17 @@ describe("GET /api/oauth/callback/ikas", () => {
     expect(response.headers.get("location")).not.toContain("attacker.example");
   });
 
-  it("rejects a hostile session store even when callback storeName is absent", async () => {
-    const session = createSession("attacker.example\\token");
+  it("rejects a hostile consumed state-store record even when callback storeName is absent", async () => {
+    const session = createSession();
     mocks.getSession.mockResolvedValue(session);
+    mocks.consumeOAuthState.mockResolvedValue({
+      status: "consumed",
+      record: { storeName: "attacker.example\\token", createdAt: STATE_CREATED_AT },
+    });
 
     const response = await GET(
       new NextRequest(
-        "https://app.example.com/api/oauth/callback/ikas?code=authorization-code&state=oauth-state",
+        `https://app.example.com/api/oauth/callback/ikas?code=authorization-code&state=${OAUTH_STATE}`,
       ),
     );
 

@@ -2,6 +2,7 @@ import { config } from "@/globals/config";
 import { getCanonicalAppOrigin, getRedirectUri, requireOAuthConfig } from "@/helpers/api-helpers";
 import { processIkasOAuthCallback } from "@/lib/ikas/oauth-callback";
 import type { OAuthFailureReason } from "@/lib/ikas/oauth-failure";
+import { consumeOAuthState } from "@/lib/ikas/oauth-state-store";
 import { isValidStoreName } from "@/lib/ikas/store-name";
 import { saveIkasToken } from "@/lib/ikas/token-store";
 import { getSession } from "@/lib/session";
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
           clientSecret: config.oauth.clientSecret!,
         };
       },
+      consumeOAuthState,
       getSession,
       async exchangeToken({ code, clientId, clientSecret, redirectUri, storeName }) {
         if (!isValidStoreName(storeName)) throw new Error("Invalid OAuth store name");

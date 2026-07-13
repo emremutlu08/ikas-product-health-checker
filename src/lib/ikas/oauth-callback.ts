@@ -3,17 +3,23 @@ import {
   saveInstallationSession,
   type SessionHandle,
 } from "../session";
+import {
+  isValidOAuthState,
+  OAUTH_STATE_FUTURE_SKEW_MS,
+  OAUTH_STATE_TTL_MS,
+  readOAuthStateCreatedAt,
+  type OAuthStateConsumeResult,
+} from "./oauth-state-store";
 import { isValidStoreName } from "./store-name";
 import { TokenStoreError, type StoredIkasToken } from "./token-store";
 import type { OAuthFailureReason } from "./oauth-failure";
 
-export const OAUTH_STATE_TTL_MS = 5 * 60_000;
-export const OAUTH_STATE_FUTURE_SKEW_MS = 30_000;
+export { OAUTH_STATE_FUTURE_SKEW_MS, OAUTH_STATE_TTL_MS } from "./oauth-state-store";
 
 export const OAUTH_CALLBACK_STAGES = [
   "oauth_config",
-  "session_state_validation",
   "state_consume",
+  "session_state_validation",
   "token_exchange",
   "app_context_query",
   "token_persist",
@@ -65,6 +71,7 @@ type OAuthTokenResponse = {
 
 export type OAuthCallbackDependencies = {
   getOAuthConfig(): OAuthConfiguration;
+  consumeOAuthState(state: string): Promise<OAuthStateConsumeResult>;
   getSession(): Promise<OAuthCallbackSession>;
   exchangeToken(input: {
     code: string;
@@ -105,11 +112,11 @@ class OAuthCallbackFailure extends Error {
 
 const STAGE_DEFAULT_REASONS: Record<OAuthCallbackStage, OAuthFailureReason> = {
   oauth_config: "oauth_config_missing",
-  session_state_validation: "session_state_missing",
+  session_state_validation: "session_save_failed",
   token_exchange: "token_exchange_failed",
   app_context_query: "app_context_http_failed",
   token_persist: "token_persist_failed",
-  state_consume: "session_save_failed",
+  state_consume: "state_store_unavailable",
   installation_session_save: "session_save_failed",
   success_redirect: "unexpected_error",
 };
@@ -251,7 +258,7 @@ export async function processIkasOAuthCallback(
       return value;
     });
 
-    const stateContext = await runStage("session_state_validation", correlationId, logger, async () => {
+    const stateContext = await runStage("state_consume", correlationId, logger, async () => {
       const code = input.code ?? "";
       const state = input.state ?? "";
       if (
@@ -262,32 +269,49 @@ export async function processIkasOAuthCallback(
       ) {
         fail("callback_invalid");
       }
-      if (!state || state.length > 512) fail("state_missing");
+      if (!state) fail("state_missing");
+      if (state.length > 512 || !isValidOAuthState(state)) fail("state_mismatch");
 
-      const session = await dependencies.getSession();
-      if (!session.state) fail("session_state_missing");
-      if (state !== session.state) fail("state_mismatch");
-      const stateIssuedAt = session.stateIssuedAt;
+      const consumed = await dependencies.consumeOAuthState(state);
+      if (consumed.status === "missing") fail("state_not_found");
+      if (consumed.status === "expired") fail("state_expired");
+      if (consumed.status === "replayed") fail("state_replayed");
+      if (consumed.status !== "consumed") fail("state_store_unavailable");
+
+      const stateIssuedAt = consumed.record.createdAt;
       const stateValidationTime = now();
       if (
         !Number.isSafeInteger(stateIssuedAt) ||
         stateIssuedAt! <= 0 ||
+        stateIssuedAt !== readOAuthStateCreatedAt(state) ||
         stateIssuedAt! > stateValidationTime + OAUTH_STATE_FUTURE_SKEW_MS ||
-        stateValidationTime - stateIssuedAt! > OAUTH_STATE_TTL_MS
+        stateValidationTime - stateIssuedAt! >= OAUTH_STATE_TTL_MS
       ) {
-        fail("state_mismatch");
+        fail(stateValidationTime - stateIssuedAt! >= OAUTH_STATE_TTL_MS ? "state_expired" : "state_mismatch");
       }
-      if (!session.storeName || !isValidStoreName(session.storeName)) fail("invalid_store_name");
+      if (!isValidStoreName(consumed.record.storeName)) fail("invalid_store_name");
 
-      attemptedStoreName = session.storeName;
+      attemptedStoreName = consumed.record.storeName;
       if (input.storeName !== undefined && input.storeName !== null && input.storeName !== attemptedStoreName) {
         fail("invalid_store_name");
       }
 
-      return { code, session, storeName: attemptedStoreName };
+      return { code, state, stateIssuedAt, storeName: attemptedStoreName };
     });
 
-    await runStage("state_consume", correlationId, logger, () => consumeOAuthStateSession(stateContext.session));
+    const session = await runStage("session_state_validation", correlationId, logger, async () => {
+      const value = await dependencies.getSession();
+      const hasCookieState = value.state !== undefined || value.stateIssuedAt !== undefined;
+      if (hasCookieState) {
+        if (value.state !== stateContext.state || value.stateIssuedAt !== stateContext.stateIssuedAt) {
+          fail("state_mismatch");
+        }
+        if (!value.storeName || !isValidStoreName(value.storeName)) fail("invalid_store_name");
+        if (value.storeName !== stateContext.storeName) fail("state_mismatch");
+      }
+      await consumeOAuthStateSession(value);
+      return value;
+    });
 
     const token = await runStage("token_exchange", correlationId, logger, async () => {
       if (!isValidStoreName(stateContext.storeName)) fail("invalid_store_name");
@@ -332,7 +356,7 @@ export async function processIkasOAuthCallback(
     });
 
     await runStage("installation_session_save", correlationId, logger, () =>
-      saveInstallationSession(stateContext.session, {
+      saveInstallationSession(session, {
         authorizedAppId: appContext.authorizedAppId,
         merchantId: appContext.merchantId,
         storeName,

@@ -2,17 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import {
   OAUTH_CALLBACK_STAGES,
   OAUTH_STATE_FUTURE_SKEW_MS,
-  OAUTH_STATE_TTL_MS,
   processIkasOAuthCallback,
   type OAuthCallbackDependencies,
   type OAuthCallbackInput,
   type OAuthCallbackLogEvent,
   type OAuthCallbackSession,
 } from "./oauth-callback";
+import {
+  MemoryOAuthStateStore,
+  OAUTH_STATE_TTL_MS,
+  OAuthStateStoreError,
+  type OAuthStateConsumeResult,
+} from "./oauth-state-store";
 import { TokenStoreError, type StoredIkasToken } from "./token-store";
 
 const ERROR_ID = "11111111-1111-4111-8111-111111111111";
 const NOW = Date.parse("2026-07-13T10:00:00.000Z");
+const STATE_CREATED_AT = NOW - 60_000;
+const OAUTH_STATE = `v1.${"A".repeat(43)}.${STATE_CREATED_AT.toString(36)}`;
+const OTHER_OAUTH_STATE = `v1.${"B".repeat(43)}.${STATE_CREATED_AT.toString(36)}`;
 
 function responseJson(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -27,9 +35,6 @@ function createFixture(
 ) {
   const events: OAuthCallbackLogEvent[] = [];
   const session: OAuthCallbackSession = {
-    state: "oauth-state",
-    stateIssuedAt: NOW - 60_000,
-    storeName: "dev-emre2",
     accessToken: "legacy-access-token",
     refreshToken: "legacy-refresh-token",
     tokenType: "Bearer",
@@ -46,9 +51,14 @@ function createFixture(
       expires_in: 3600,
     },
   }));
+  const consumeOAuthState = vi.fn(async (): Promise<OAuthStateConsumeResult> => ({
+    status: "consumed",
+    record: { storeName: "dev-emre2", createdAt: STATE_CREATED_AT },
+  }));
   const persistToken = vi.fn(async (token: StoredIkasToken) => ({ ...token }));
   const dependencies: OAuthCallbackDependencies = {
     getOAuthConfig: () => ({ clientId: "client-id", clientSecret: "client-secret" }),
+    consumeOAuthState,
     getSession: async () => session,
     exchangeToken,
     queryAppContext: async () =>
@@ -69,18 +79,18 @@ function createFixture(
   };
   const input: OAuthCallbackInput = {
     code: "authorization-code",
-    state: "oauth-state",
+    state: OAUTH_STATE,
     storeName: "dev-emre2",
     redirectUri: "https://app.example.com/api/oauth/callback/ikas",
     successBaseUrl: "https://app.example.com",
     ...inputOverrides,
   };
 
-  return { dependencies, events, exchangeToken, input, persistToken, session };
+  return { consumeOAuthState, dependencies, events, exchangeToken, input, persistToken, session };
 }
 
 describe("processIkasOAuthCallback", () => {
-  it("persists a verified installation, establishes a tenant-only session, and returns a clean redirect", async () => {
+  it("accepts valid server state without cookie state and establishes a tenant-only session", async () => {
     const fixture = createFixture();
 
     const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
@@ -110,12 +120,13 @@ describe("processIkasOAuthCallback", () => {
       save: expect.any(Function),
     });
     expect(fixture.session.save).toHaveBeenCalledTimes(2);
+    expect(fixture.consumeOAuthState).toHaveBeenCalledWith(OAUTH_STATE);
     expect(
       fixture.events.filter((event) => event.outcome === "success").map((event) => event.stage),
     ).toEqual(OAUTH_CALLBACK_STAGES);
   });
 
-  it("uses the exact validated session store when the callback omits storeName", async () => {
+  it("uses only the exact consumed server-state store when the callback omits storeName", async () => {
     const fixture = createFixture({}, { storeName: undefined });
 
     const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
@@ -124,6 +135,23 @@ describe("processIkasOAuthCallback", () => {
     expect(fixture.exchangeToken).toHaveBeenCalledWith(
       expect.objectContaining({ storeName: "dev-emre2" }),
     );
+  });
+
+  it("rejects a replay after an injected one-time state store accepts the callback once", async () => {
+    const stateStore = new MemoryOAuthStateStore(() => NOW);
+    await stateStore.persist(
+      OAUTH_STATE,
+      { storeName: "dev-emre2", createdAt: STATE_CREATED_AT },
+      OAUTH_STATE_TTL_MS,
+    );
+    const fixture = createFixture({ consumeOAuthState: (state) => stateStore.consume(state) });
+
+    const firstResult = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+    const replayResult = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+
+    expect(firstResult.ok).toBe(true);
+    expect(replayResult).toMatchObject({ ok: false, reason: "state_replayed" });
+    expect(fixture.exchangeToken).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -147,15 +175,23 @@ describe("processIkasOAuthCallback", () => {
   });
 
   it.each(["attacker.example\\token", "user@attacker", "foo\u0000bar", "foo.myikas.com", ""])(
-    "rejects an invalid session-bound store %j before token exchange",
+    "rejects a hostile consumed state-store record %j before token exchange",
     async (storeName) => {
-      const fixture = createFixture({}, { storeName: undefined });
-      fixture.session.storeName = storeName;
+      const fixture = createFixture(
+        {
+          consumeOAuthState: async () => ({
+            status: "consumed",
+            record: { storeName, createdAt: STATE_CREATED_AT },
+          }),
+        },
+        { storeName: undefined },
+      );
 
       const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
 
       expect(result).toMatchObject({ ok: false, reason: "invalid_store_name" });
       expect(fixture.exchangeToken).not.toHaveBeenCalled();
+      expect(fixture.session.save).not.toHaveBeenCalled();
     },
   );
 
@@ -168,22 +204,67 @@ describe("processIkasOAuthCallback", () => {
     expect(fixture.persistToken).not.toHaveBeenCalled();
   });
 
-  it("requires callback state to exactly match the session state", async () => {
-    const fixture = createFixture({}, { state: " oauth-state " });
+  it("rejects malformed callback state before a store lookup", async () => {
+    const fixture = createFixture({}, { state: " malformed-state " });
 
     const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
 
     expect(result).toMatchObject({ ok: false, reason: "state_mismatch", errorId: ERROR_ID });
+    expect(fixture.consumeOAuthState).not.toHaveBeenCalled();
     expect(fixture.persistToken).not.toHaveBeenCalled();
   });
 
   it.each([
-    { label: "missing", issuedAt: undefined },
-    { label: "expired", issuedAt: NOW - OAUTH_STATE_TTL_MS - 1 },
-    { label: "too far in the future", issuedAt: NOW + OAUTH_STATE_FUTURE_SKEW_MS + 1 },
-  ])("rejects $label OAuth state timestamps", async ({ issuedAt }) => {
+    { status: "missing" as const, reason: "state_not_found" },
+    { status: "expired" as const, reason: "state_expired" },
+    { status: "replayed" as const, reason: "state_replayed" },
+  ])("rejects $status server state distinctly", async ({ reason, status }) => {
+    const fixture = createFixture({ consumeOAuthState: async () => ({ status }) });
+
+    const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+
+    expect(result).toMatchObject({ ok: false, reason });
+    expect(fixture.exchangeToken).not.toHaveBeenCalled();
+    expect(fixture.session.save).not.toHaveBeenCalled();
+  });
+
+  it("rejects a server-state timestamp that is too far in the future", async () => {
+    const futureCreatedAt = NOW + OAUTH_STATE_FUTURE_SKEW_MS + 1;
+    const futureState = `v1.${"C".repeat(43)}.${futureCreatedAt.toString(36)}`;
+    const fixture = createFixture(
+      {
+        consumeOAuthState: async () => ({
+          status: "consumed",
+          record: { storeName: "dev-emre2", createdAt: futureCreatedAt },
+        }),
+      },
+      { state: futureState },
+    );
+
+    const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+
+    expect(result).toMatchObject({ ok: false, reason: "state_mismatch" });
+    expect(fixture.exchangeToken).not.toHaveBeenCalled();
+  });
+
+  it("rejects a backend consume failure without exchanging the authorization code", async () => {
+    const fixture = createFixture({
+      consumeOAuthState: vi.fn().mockRejectedValue(new OAuthStateStoreError("backend", "consume")),
+    });
+
+    const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+
+    expect(result).toMatchObject({ ok: false, reason: "state_store_unavailable" });
+    expect(fixture.exchangeToken).not.toHaveBeenCalled();
+    expect(fixture.persistToken).not.toHaveBeenCalled();
+    expect(fixture.session.save).not.toHaveBeenCalled();
+  });
+
+  it("rejects a present cookie state that conflicts with the consumed server state", async () => {
     const fixture = createFixture();
-    fixture.session.stateIssuedAt = issuedAt;
+    fixture.session.state = OTHER_OAUTH_STATE;
+    fixture.session.stateIssuedAt = STATE_CREATED_AT;
+    fixture.session.storeName = "dev-emre2";
 
     const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
 
@@ -311,8 +392,9 @@ describe("processIkasOAuthCallback", () => {
     expect(result).toMatchObject({ ok: false, reason: "token_store_unavailable", errorId: ERROR_ID });
   });
 
-  it("keeps authorization codes, cookies, tokens, client secrets, and auth headers out of diagnostics", async () => {
+  it("keeps state, codes, cookies, tokens, client secrets, and auth headers out of diagnostics", async () => {
     const secrets = {
+      state: OAUTH_STATE,
       code: "AUTHORIZATION_CODE_SENTINEL",
       accessToken: "ACCESS_TOKEN_SENTINEL",
       refreshToken: "REFRESH_TOKEN_SENTINEL",
@@ -347,6 +429,13 @@ describe("processIkasOAuthCallback", () => {
 
     for (const secret of Object.values(secrets)) {
       expect(diagnostics).not.toContain(secret);
+    }
+    for (const event of fixture.events) {
+      expect(
+        Object.keys(event).every((key) =>
+          ["event", "correlationId", "stage", "outcome", "reason"].includes(key),
+        ),
+      ).toBe(true);
     }
     expect(diagnostics).toContain(ERROR_ID);
     expect(diagnostics).toContain("token_persist_failed");
