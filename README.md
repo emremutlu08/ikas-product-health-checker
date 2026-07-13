@@ -64,15 +64,8 @@ The UI now reads through `getProductHealthReport()` instead of importing sample 
 - `src/app/api/report/route.ts` returns JSON report.
 - `src/app/api/report.csv/route.ts` returns CSV.
 
-Default mode is mock. Live mode is intentionally gated by env vars:
-
-```bash
-IKAS_PRODUCT_ADAPTER=http
-IKAS_GRAPHQL_ENDPOINT=<real endpoint>
-IKAS_ADMIN_API_TOKEN=<token>
-```
-
-Do not enable live mode until a test store/OAuth token is available.
+The production report path is live-only and requires a tenant-bound installation session backed by a durable OAuth record. `MockIkasProductAdapter` and sample products remain fixtures; the dashboard and report APIs never fall back to them.
+Normal app runtime obtains tokens through OAuth and the server-side `TokenStore`; there is no environment-selected mock adapter path.
 
 
 ## Live ikas validation
@@ -85,7 +78,7 @@ Working flow:
 npx ikas app dev
 ```
 
-Then open the app-store launch URL printed by the CLI. The app receives `storeName` and `authorizedAppId`, runs OAuth when needed, stores the token locally, and renders a live report.
+Then open the app-store launch URL printed by the CLI. The app validates the signed, fresh launch context, runs OAuth when needed, durably stores and verifies the token, and renders a live report from an HttpOnly installation session.
 
 Expected live UI badge:
 
@@ -94,13 +87,23 @@ Data source: live ikas GraphQL
 Store: dev-emremutlu
 ```
 
-Local runtime token storage:
+Local-development runtime token storage:
 
 ```text
 .ikas-runtime-tokens.json
 ```
 
 This file is gitignored and must never be committed.
+
+Production must use a managed Redis-compatible REST store. The preferred current environment names are `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`; both are server-only. Missing production storage configuration fails the OAuth install safely and never falls back to this file or to session-only auth.
+
+Production also requires `NEXT_PUBLIC_DEPLOY_URL` to be the exact canonical HTTPS origin, for example `https://health.example.com`. It must not contain a path, query, fragment, userinfo, backslash, or control character. Request `Host` and forwarded-host headers are never used to build OAuth callbacks. Plain HTTP is accepted only for explicit loopback origins outside production.
+
+The report page, JSON endpoint, and CSV endpoint derive tenant identity only from the validated HttpOnly installation session. Query-string installation identifiers are not an authorization mechanism and are not included in dashboard, filter, CSV, or mail links.
+
+Production refresh rotation is serialized by a distributed per-installation Redis lease with a monotonic fencing token. The lease winner re-reads the durable record before refresh; waiters re-read after acquisition/waiting, and token replacement, confirmed invalid-grant deletion, and lease release all verify the current lease owner/fence.
+
+Uninstall token cleanup remains a follow-up. Add it only after the exact ikas uninstall event name, payload, and signature-verification contract are confirmed from an in-repository integration contract.
 
 Known dev-only console noise:
 

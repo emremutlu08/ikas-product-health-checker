@@ -1,5 +1,6 @@
 const MYIKAS_SUFFIX = ".myikas.com";
 const STORE_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const HOSTILE_URL_CHARACTER_PATTERN = /[%@\\\u0000-\u001f\u007f-\u009f]/;
 
 export function normalizeStoreNameInput(value?: string | null) {
   const trimmed = value?.trim() ?? "";
@@ -17,5 +18,5 @@ export function normalizeStoreNameInput(value?: string | null) {
 }
 
 export function isValidStoreName(value: string) {
-  return STORE_NAME_PATTERN.test(value);
+  return !HOSTILE_URL_CHARACTER_PATTERN.test(value) && STORE_NAME_PATTERN.test(value);
 }
