@@ -95,6 +95,26 @@ Data source: live ikas GraphQL
 Store: dev-emremutlu
 ```
 
+## Automated and live verification matrix
+
+Run the automated quality gates before every review submission:
+
+```bash
+pnpm test:all
+pnpm lint
+pnpm build
+```
+
+| Surface | Automated coverage | Live/manual gate |
+| --- | --- | --- |
+| Health rules, scoring, adapters, OAuth, sessions, token persistence/refresh | Vitest | Re-check only when ikas contracts or credentials change |
+| Authenticated dashboard rendering, rule filtering, CSV/edit links | Server-rendered Vitest regression tests | Confirm with the real development-store catalog before Marketplace submission |
+| Installation-required UI, store-name normalization, safe OAuth failures | Playwright Chromium smoke tests | Confirm embedded layout in the ikas admin iframe |
+| `/api/report` and `/api/report.csv` tenant protection | Vitest and Playwright unauthenticated smoke tests | Open both links from the same signed ikas browser session |
+| Signed launch, OAuth provider redirect, live `listProduct`, CDN images | Not reproducible without ikas context | Required development-store launch check |
+
+The browser suite deliberately does not add a production mock fallback, authentication bypass, or test seeding route. A green automated suite therefore proves local regressions are covered; it does not by itself prove the external ikas launch/provider path is currently available.
+
 ## Live verification
 
 Open the app through the signed app-store launch URL. After the launch or OAuth callback establishes the HttpOnly installation session, verify the dashboard and use its `/api/report` and `/api/report.csv` links in the same browser session. Do not construct report URLs with installation identifiers.

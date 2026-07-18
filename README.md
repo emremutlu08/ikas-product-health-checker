@@ -23,10 +23,16 @@ Read-only ikas admin app MVP for validating merchant interest before building a 
 
 ```bash
 pnpm test
+pnpm test:e2e
+pnpm test:all
 pnpm lint
 pnpm build
 pnpm dev
 ```
+
+`pnpm test:e2e` starts an isolated local Next.js server and runs Chromium smoke coverage for the installation-required screen, store-name normalization, safe OAuth failure rendering, and tenant-protected report endpoints. It does not replace the signed ikas launch check against a real development store.
+
+The `.github/workflows/quality.yml` workflow runs `pnpm test:all`, lint, and the production build for every pull request and every push to `main`.
 
 ## V1 scope
 

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { IkasUpstreamError } from "@/lib/ikas/errors";
+import { IkasTokenRefreshError, TokenStoreError } from "@/lib/ikas/token-store";
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -69,8 +71,46 @@ describe("tenant-bound report routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="ikas-product-health-report.csv"',
+    );
     expect(mocks.getProductHealthReportCsv).toHaveBeenCalledWith(installation);
     expect(await response.text()).toBe("product,issue\n");
+  });
+
+  it.each([
+    {
+      name: "token backend failures",
+      error: new TokenStoreError("backend", "get"),
+      status: 503,
+      code: "IKAS_TOKEN_BACKEND_UNAVAILABLE",
+    },
+    {
+      name: "token refresh failures",
+      error: new IkasTokenRefreshError("network"),
+      status: 503,
+      code: "IKAS_TOKEN_BACKEND_UNAVAILABLE",
+    },
+    {
+      name: "ikas upstream failures",
+      error: new IkasUpstreamError("IKAS_UPSTREAM_GRAPHQL_ERROR"),
+      status: 502,
+      code: "IKAS_UPSTREAM_GRAPHQL_ERROR",
+    },
+    {
+      name: "unexpected failures",
+      error: new Error("unexpected"),
+      status: 500,
+      code: "IKAS_REPORT_FAILED",
+    },
+  ])("maps $name to a private safe CSV error", async ({ error, status, code }) => {
+    mocks.getProductHealthReportCsv.mockRejectedValue(error);
+
+    const response = await getCsvReport(new Request("https://health.example.com/api/report.csv"));
+
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await response.json()).toEqual({ error: code });
   });
 
   it("protects CSV errors from shared caching", async () => {
