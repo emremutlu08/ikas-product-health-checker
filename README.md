@@ -22,6 +22,8 @@ Read-only ikas admin app MVP for validating merchant interest before building a 
 ## Commands
 
 ```bash
+pnpm install
+pnpm exec playwright install chromium
 pnpm test
 pnpm test:e2e
 pnpm test:all
@@ -29,6 +31,8 @@ pnpm lint
 pnpm build
 pnpm dev
 ```
+
+Chromium kurulumu temiz checkout başına bir kez gerekir. Linux CI, gerekli sistem paketlerini de kurmak için `pnpm exec playwright install --with-deps chromium` komutunu kullanır.
 
 `pnpm test:e2e` starts an isolated local Next.js server and runs Chromium smoke coverage for the installation-required screen, store-name normalization, safe OAuth failure rendering, and tenant-protected report endpoints. It does not replace the signed ikas launch check against a real development store.
 
