@@ -29,9 +29,23 @@ describe("buildHealthReport", () => {
   it("detects stock and pricing risks", () => {
     expect(report.issueCountsByCode.zero_stock_blocked).toBe(1);
     expect(report.issueCountsByCode.missing_price).toBe(1);
-    expect(report.lowStockRiskCount).toBe(1);
     expect(report.criticalCount).toBeGreaterThan(0);
     expect(report.score).toBeLessThan(100);
+  });
+
+  it("reports blocked out-of-stock variants under a name that matches what is measured", () => {
+    expect(report.outOfStockBlockedCount).toBe(report.issueCountsByCode.zero_stock_blocked);
+    expect(report.outOfStockBlockedCount).toBe(1);
+    // No configurable low-stock threshold exists yet, so no field may imply one.
+    expect(report).not.toHaveProperty("lowStockRiskCount");
+  });
+
+  it("preserves health score and rule behaviour while the stock metric is renamed", () => {
+    expect(report.score).toBe(41);
+    expect(report.criticalCount).toBe(5);
+    expect(report.warningCount).toBe(7);
+    expect(report.infoCount).toBe(3);
+    expect(report.ruleSummaries.find((rule) => rule.code === "out_of_stock")?.count).toBe(1);
   });
 
   it("builds mistake finder rule summaries and product rows", () => {

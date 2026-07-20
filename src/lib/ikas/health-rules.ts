@@ -279,7 +279,7 @@ export function buildHealthReport(products: IkasProduct[], now = new Date(), opt
     criticalCount,
     warningCount,
     infoCount,
-    lowStockRiskCount: issueCountsByCode.zero_stock_blocked,
+    outOfStockBlockedCount: issueCountsByCode.zero_stock_blocked,
     ruleSummaries,
     productRows: Array.from(grouped.values()).sort((a, b) => b.mistakes.length - a.mistakes.length),
     issues,

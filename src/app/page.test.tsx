@@ -63,7 +63,7 @@ const report: HealthReport = {
   criticalCount: 4,
   warningCount: 0,
   infoCount: 0,
-  lowStockRiskCount: 1,
+  outOfStockBlockedCount: 1,
   ruleSummaries: [
     { code: "missing_sku", label: "SKU Eksik", count: 1 },
     { code: "same_sku", label: "Aynı SKU", count: 1 },
@@ -123,6 +123,41 @@ describe("authenticated product health dashboard", () => {
     expect(html).toContain("Eksik SKU Ürünü");
     expect(html).not.toContain("Stoksuz Ürün");
     expect(html).toContain('href="/?rule=missing_sku"');
+  });
+
+  it("submits paid-feature interest through a tenant-bound POST instead of a mailto link", async () => {
+    const html = await renderHome();
+
+    expect(html).toContain('action="/api/interest"');
+    expect(html).toContain('method="post"');
+    expect(html).toContain('value="low_stock_threshold_monitoring"');
+    expect(html).not.toContain("mailto:");
+    // The tenant is resolved server-side from the session, never posted by the client.
+    expect(html).not.toContain("app-1");
+    expect(html).not.toContain("merchant-1");
+  });
+
+  it("describes threshold monitoring as planned instead of selling the zero-stock count as a low-stock result", async () => {
+    const html = await renderHome();
+
+    expect(html).toContain("stok dışı satış kapalı");
+    expect(html).toContain("Planlanan ücretli özellik");
+    expect(html).not.toContain("stok riski bulundu");
+  });
+
+  it("shows a safe thank-you status after the interest redirect", async () => {
+    const html = await renderHome({ interest: "recorded" });
+
+    expect(html).toContain("İlginizi kaydettik");
+    expect(html).not.toContain('action="/api/interest"');
+  });
+
+  it("ignores an unrecognised interest status value", async () => {
+    const html = await renderHome({ interest: "<script>alert(1)</script>" });
+
+    expect(html).not.toContain("İlginizi kaydettik");
+    expect(html).not.toContain("alert(1)");
+    expect(html).toContain('action="/api/interest"');
   });
 
   it("renders the setup-required screen without consulting live report data", async () => {

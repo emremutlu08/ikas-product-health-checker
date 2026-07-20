@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { IkasAuthenticationError, IkasUpstreamError } from "./errors";
-import { HttpIkasProductAdapter } from "./product-adapter";
+import { HttpIkasProductAdapter, PRODUCT_GRAPHQL_TIMEOUT_MS } from "./product-adapter";
 
 const firstPage = {
   data: {
@@ -90,6 +90,97 @@ describe("HttpIkasProductAdapter", () => {
     ).rejects.toBeInstanceOf(IkasAuthenticationError);
 
     vi.unstubAllGlobals();
+  });
+
+  it("refuses to keep paginating past the configured page budget instead of returning partial data", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => new Response(JSON.stringify(firstPage), { status: 200 }));
+
+    const promise = new HttpIkasProductAdapter(
+      "https://example.test/graphql",
+      "token",
+      200,
+      fetchMock,
+      PRODUCT_GRAPHQL_TIMEOUT_MS,
+      { maxPages: 2 },
+    ).listProducts();
+
+    await expect(promise).rejects.toBeInstanceOf(IkasUpstreamError);
+    await expect(promise).rejects.toMatchObject({ code: "IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses to return a catalog larger than the configured product budget", async () => {
+    const oversizedPage = {
+      data: {
+        listProduct: {
+          data: [
+            { id: "p1", name: "Product 1", type: "PHYSICAL", deleted: false, variants: [] },
+            { id: "p2", name: "Product 2", type: "PHYSICAL", deleted: false, variants: [] },
+            { id: "p3", name: "Product 3", type: "PHYSICAL", deleted: false, variants: [] },
+          ],
+          hasNext: false,
+          page: 1,
+          limit: 200,
+        },
+      },
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(oversizedPage), { status: 200 }));
+
+    const promise = new HttpIkasProductAdapter(
+      "https://example.test/graphql",
+      "token",
+      200,
+      fetchMock,
+      PRODUCT_GRAPHQL_TIMEOUT_MS,
+      { maxProducts: 2 },
+    ).listProducts();
+
+    await expect(promise).rejects.toMatchObject({ code: "IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects unusable scan budgets at construction time", () => {
+    expect(
+      () =>
+        new HttpIkasProductAdapter("https://example.test/graphql", "token", 200, fetch, PRODUCT_GRAPHQL_TIMEOUT_MS, {
+          maxPages: 0,
+        }),
+    ).toThrow(IkasUpstreamError);
+    expect(
+      () =>
+        new HttpIkasProductAdapter("https://example.test/graphql", "token", 200, fetch, PRODUCT_GRAPHQL_TIMEOUT_MS, {
+          maxProducts: -1,
+        }),
+    ).toThrow(IkasUpstreamError);
+  });
+
+  it("keeps the page limit bounded to the ikas maximum", () => {
+    expect(() => new HttpIkasProductAdapter("https://example.test/graphql", "token", 201)).toThrow(IkasUpstreamError);
+  });
+
+  it("enforces one elapsed-time budget across the complete paginated scan", async () => {
+    let now = 1_000;
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      now = 1_101;
+      return new Response(JSON.stringify(secondPage), { status: 200 });
+    });
+
+    const promise = new HttpIkasProductAdapter(
+      "https://example.test/graphql",
+      "token",
+      200,
+      fetchMock,
+      PRODUCT_GRAPHQL_TIMEOUT_MS,
+      { maxDurationMs: 100, now: () => now },
+    ).listProducts();
+
+    await expect(promise).rejects.toMatchObject({ code: "IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED" });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("bounds a hung GraphQL request and returns only a sanitized upstream error", async () => {
