@@ -135,7 +135,11 @@ export type HealthReport = {
   criticalCount: number;
   warningCount: number;
   infoCount: number;
-  lowStockRiskCount: number;
+  /**
+   * Variants that are out of stock while out-of-stock selling is disabled. This is a
+   * hard blocked-sale count, not a configurable low-stock threshold result.
+   */
+  outOfStockBlockedCount: number;
   ruleSummaries: MistakeRuleSummary[];
   productRows: ProductMistakeRow[];
   issues: HealthIssue[];

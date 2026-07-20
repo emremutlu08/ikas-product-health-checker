@@ -69,9 +69,7 @@ export default async function Home({
     : report.productRows;
   const baseDashboardHref = "/";
   const scanStatus = report.scanStatus === "success" ? "Başarılı" : "Sırada";
-  const lowStockIntentHref = `mailto:mutluemre93@gmail.com?subject=${encodeURIComponent("Stok uyarısı ilgimi çekti")}&body=${encodeURIComponent(
-    `Mağaza: ${effectiveStoreName ?? "bilinmiyor"}\nMevcut stok riskleri: ${report.lowStockRiskCount}`,
-  )}`;
+  const interestRecorded = params.interest === "recorded";
 
   return (
     <main className="min-h-screen bg-[#f6f6f7] text-[#202223]">
@@ -212,14 +210,30 @@ export default async function Home({
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-300">Ücretli MVP sinyali</p>
-              <h2 className="mt-2 text-2xl font-bold">{report.lowStockRiskCount} stok riski bulundu</h2>
+              <h2 className="mt-2 text-2xl font-bold">
+                {report.outOfStockBlockedCount} varyantta stok tükenmiş ve stok dışı satış kapalı
+              </h2>
               <p className="mt-2 max-w-3xl text-slate-300">
-                Sonraki ücretli faz: günlük düşük stok özeti, eşik bazlı uyarılar ve e-posta/Slack bildirimi. V1’de stok veya ürün güncellemesi yapılmaz.
+                Planlanan ücretli özellik: kendi belirlediğiniz eşiğe göre düşük stok takibi, günlük özet ve bildirim.
+                Bu eşik henüz ölçülmüyor; yukarıdaki sayı yalnızca tamamen stoksuz ve satışa kapalı varyantları gösterir.
+                V1’de stok veya ürün güncellemesi yapılmaz.
               </p>
             </div>
-            <a className="rounded-full bg-white px-5 py-3 text-center text-sm font-bold text-slate-950 transition hover:bg-emerald-100" href={lowStockIntentHref}>
-              İlgimi çekti
-            </a>
+            {interestRecorded ? (
+              <p className="rounded-full bg-emerald-400/15 px-5 py-3 text-center text-sm font-bold text-emerald-200 ring-1 ring-emerald-400/40">
+                İlginizi kaydettik. Eşik takibi yayına çıktığında haber vereceğiz.
+              </p>
+            ) : (
+              <form action="/api/interest" method="post">
+                <input type="hidden" name="intent" value="low_stock_threshold_monitoring" />
+                <button
+                  type="submit"
+                  className="rounded-full bg-white px-5 py-3 text-center text-sm font-bold text-slate-950 transition hover:bg-emerald-100"
+                >
+                  İlgimi çekti
+                </button>
+              </form>
+            )}
           </div>
         </section>
       </section>
