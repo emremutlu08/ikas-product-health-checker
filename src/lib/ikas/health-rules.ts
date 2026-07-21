@@ -26,7 +26,13 @@ const ISSUE_CODES: HealthIssueCode[] = [
 ];
 
 
-const RULE_LABELS: Record<MistakeRuleCode, string> = {
+/**
+ * The merchant-facing label for each rule, and the canonical rule order every report is
+ * summarised in. Exported alongside `ISSUE_TO_RULE` so the snapshot store can re-derive a
+ * persisted report's product rows and rule summaries from its own issues: a translated copy
+ * kept anywhere else would drift on the next copy edit and start rejecting valid reports.
+ */
+export const RULE_LABELS: Record<MistakeRuleCode, string> = {
   incorrect_price: "Hatalı Fiyat",
   out_of_stock: "Stokta Yok",
   missing_images: "Görsel Eksik",
@@ -36,7 +42,12 @@ const RULE_LABELS: Record<MistakeRuleCode, string> = {
   weird_description: "Sorunlu Açıklama",
 };
 
-const ISSUE_TO_RULE: Partial<Record<HealthIssueCode, MistakeRuleCode>> = {
+/**
+ * The single mapping from an issue code to the merchant-facing rule it rolls up into.
+ * Exported so the snapshot store can re-derive rule summaries and product rows from the
+ * persisted issues; a second private copy would drift and reject valid reports.
+ */
+export const ISSUE_TO_RULE: Partial<Record<HealthIssueCode, MistakeRuleCode>> = {
   missing_price: "incorrect_price",
   zero_stock_blocked: "out_of_stock",
   missing_image: "missing_images",
@@ -45,6 +56,9 @@ const ISSUE_TO_RULE: Partial<Record<HealthIssueCode, MistakeRuleCode>> = {
   duplicate_title: "duplicate_title",
   weird_description: "weird_description",
 };
+
+/** Every rule a report summarises, in the order `buildHealthReport` emits them. */
+export const MISTAKE_RULE_CODES = Object.keys(RULE_LABELS) as [MistakeRuleCode, ...MistakeRuleCode[]];
 
 const WEIGHTS: Record<HealthIssueSeverity, number> = {
   critical: 7,
@@ -237,13 +251,13 @@ export function buildHealthReport(products: IkasProduct[], now = new Date(), opt
   const affectedProductIds = new Set(issues.map((issue) => issue.productId));
 
   const ruleCounts = new Map<MistakeRuleCode, Set<string>>();
-  for (const code of Object.keys(RULE_LABELS) as MistakeRuleCode[]) ruleCounts.set(code, new Set());
+  for (const code of MISTAKE_RULE_CODES) ruleCounts.set(code, new Set());
   for (const issue of issues) {
     const rule = ISSUE_TO_RULE[issue.code];
     if (rule) ruleCounts.get(rule)?.add(issue.productId);
   }
 
-  const ruleSummaries = (Object.keys(RULE_LABELS) as MistakeRuleCode[]).map((code) => ({
+  const ruleSummaries = MISTAKE_RULE_CODES.map((code) => ({
     code,
     label: RULE_LABELS[code],
     count: ruleCounts.get(code)?.size ?? 0,

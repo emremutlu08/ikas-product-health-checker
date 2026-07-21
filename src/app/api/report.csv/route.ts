@@ -1,6 +1,7 @@
 import { getProductHealthReportCsv } from "@/lib/ikas/report-service";
 import { IkasAuthenticationError, IkasUpstreamError } from "@/lib/ikas/errors";
 import { IkasTokenRefreshError, TokenStoreError } from "@/lib/ikas/token-store";
+import { SnapshotStoreError } from "@/lib/scans/snapshot-store";
 import { getSession, readInstallationSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,7 @@ function jsonResponse(body: unknown, status: number) {
   return Response.json(body, { status, headers: PRIVATE_NO_STORE_HEADERS });
 }
 
+/** CSV exports the stored snapshot; downloading a report never triggers a second scan. */
 export async function GET(request: Request) {
   void request;
   try {
@@ -17,6 +19,10 @@ export async function GET(request: Request) {
     if (!installation) return jsonResponse({ error: "IKAS_LIVE_AUTH_REQUIRED" }, 401);
 
     const csv = await getProductHealthReportCsv(installation);
+    if (csv === undefined) {
+      return jsonResponse({ error: "IKAS_SCAN_SNAPSHOT_MISSING" }, 404);
+    }
+
     return new Response(csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",
@@ -30,6 +36,9 @@ export async function GET(request: Request) {
     }
     if (error instanceof TokenStoreError || error instanceof IkasTokenRefreshError) {
       return jsonResponse({ error: "IKAS_TOKEN_BACKEND_UNAVAILABLE" }, 503);
+    }
+    if (error instanceof SnapshotStoreError) {
+      return jsonResponse({ error: "IKAS_SNAPSHOT_BACKEND_UNAVAILABLE" }, 503);
     }
     if (error instanceof IkasUpstreamError) {
       return jsonResponse({ error: error.code }, 502);

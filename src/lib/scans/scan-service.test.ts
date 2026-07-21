@@ -1,0 +1,246 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { IkasAuthenticationError, IkasUpstreamError } from "@/lib/ikas/errors";
+import { PRODUCT_SCAN_MAX_DURATION_MS } from "@/lib/ikas/product-adapter";
+import type { HealthReport } from "@/lib/ikas/types";
+import { MemorySnapshotStore, type ScanSnapshot } from "./snapshot-store";
+import {
+  runManualScan,
+  SCAN_LEASE_TTL_MS,
+  ScanBusyError,
+  type ManualScanDependencies,
+} from "./scan-service";
+
+const installation = {
+  authorizedAppId: "app-1",
+  merchantId: "merchant-1",
+  storeName: "dev-emre2",
+};
+
+const otherInstallation = {
+  authorizedAppId: "app-2",
+  merchantId: "merchant-2",
+  storeName: "other-store",
+};
+
+/** Aggregates mirror the rows exactly; the store refuses a report that contradicts itself. */
+function reportFor(score = 82, generatedAt = "2026-07-20T08:00:00.000Z"): HealthReport {
+  return {
+    generatedAt,
+    score,
+    productCount: 3,
+    variantCount: 5,
+    issueCount: 1,
+    affectedProductCount: 1,
+    scanStatus: "success",
+    issueCountsByCode: {
+      missing_sku: 1,
+      missing_barcode: 0,
+      duplicate_sku: 0,
+      duplicate_barcode: 0,
+      missing_image: 0,
+      missing_description: 0,
+      missing_category: 0,
+      missing_brand: 0,
+      missing_vendor: 0,
+      zero_stock_blocked: 0,
+      missing_price: 0,
+      duplicate_title: 0,
+      weird_description: 0,
+    },
+    criticalCount: 1,
+    warningCount: 0,
+    infoCount: 0,
+    outOfStockBlockedCount: 0,
+    ruleSummaries: [
+      { code: "incorrect_price", label: "Hatalı Fiyat", count: 0 },
+      { code: "out_of_stock", label: "Stokta Yok", count: 0 },
+      { code: "missing_images", label: "Görsel Eksik", count: 0 },
+      { code: "missing_sku", label: "SKU Eksik", count: 1 },
+      { code: "same_sku", label: "Aynı SKU", count: 0 },
+      { code: "duplicate_title", label: "Tekrarlanan Başlık", count: 0 },
+      { code: "weird_description", label: "Sorunlu Açıklama", count: 0 },
+    ],
+    productRows: [
+      {
+        productId: "product-1",
+        productName: "Eksik SKU Ürünü",
+        imageLabel: "ES",
+        mistakes: ["SKU Eksik"],
+        actionLabel: "İncele",
+      },
+    ],
+    issues: [
+      {
+        code: "missing_sku",
+        severity: "critical",
+        productId: "product-1",
+        productName: "Eksik SKU Ürünü",
+        message: "SKU yok.",
+      },
+    ],
+  };
+}
+
+function previousSnapshot(): ScanSnapshot {
+  return {
+    version: 1,
+    scanId: "scan-previous",
+    authorizedAppId: installation.authorizedAppId,
+    merchantId: installation.merchantId,
+    generatedAt: "2026-07-19T08:00:00.000Z",
+    report: reportFor(40, "2026-07-19T08:00:00.000Z"),
+  };
+}
+
+function createFixture(collectReport = vi.fn().mockResolvedValue(reportFor())) {
+  const snapshotStore = new MemorySnapshotStore();
+  let scanCounter = 0;
+  const dependencies: ManualScanDependencies = {
+    collectReport,
+    snapshotStore,
+    now: () => new Date("2026-07-20T08:00:00.000Z"),
+    createScanId: () => `scan-${++scanCounter}`,
+    createLeaseOwnerId: () => `owner-${scanCounter}`,
+  };
+  return { collectReport, dependencies, snapshotStore };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("runManualScan", () => {
+  it("calls the ikas report source exactly once and persists exactly one snapshot", async () => {
+    const fixture = createFixture();
+    const putLatest = vi.spyOn(fixture.snapshotStore, "putLatest");
+
+    const snapshot = await runManualScan(installation, fixture.dependencies);
+
+    expect(fixture.collectReport).toHaveBeenCalledOnce();
+    expect(putLatest).toHaveBeenCalledOnce();
+    expect(snapshot).toEqual({
+      version: 1,
+      scanId: "scan-1",
+      authorizedAppId: "app-1",
+      merchantId: "merchant-1",
+      generatedAt: "2026-07-20T08:00:00.000Z",
+      report: reportFor(),
+    });
+    await expect(fixture.snapshotStore.getLatest(installation)).resolves.toEqual(snapshot);
+  });
+
+  it("binds the persisted snapshot to the server-side installation, not to the report body", async () => {
+    const fixture = createFixture();
+
+    const snapshot = await runManualScan(installation, fixture.dependencies);
+
+    expect(snapshot.authorizedAppId).toBe(installation.authorizedAppId);
+    expect(snapshot.merchantId).toBe(installation.merchantId);
+    expect(JSON.stringify(snapshot)).not.toContain("accessToken");
+    await expect(fixture.snapshotStore.getLatest(otherInstallation)).resolves.toBeUndefined();
+  });
+
+  it("refuses to scan without a server-side installation session", async () => {
+    const fixture = createFixture();
+    const acquireScanLease = vi.spyOn(fixture.snapshotStore, "acquireScanLease");
+
+    await expect(runManualScan(undefined, fixture.dependencies)).rejects.toBeInstanceOf(
+      IkasAuthenticationError,
+    );
+    expect(acquireScanLease).not.toHaveBeenCalled();
+    expect(fixture.collectReport).not.toHaveBeenCalled();
+  });
+
+  it("rejects a concurrent duplicate scan for the same installation without a second upstream call", async () => {
+    let release!: (report: HealthReport) => void;
+    const pending = new Promise<HealthReport>((resolve) => {
+      release = resolve;
+    });
+    const fixture = createFixture(vi.fn().mockReturnValue(pending));
+
+    const first = runManualScan(installation, fixture.dependencies);
+    await expect(runManualScan(installation, fixture.dependencies)).rejects.toBeInstanceOf(
+      ScanBusyError,
+    );
+
+    release(reportFor());
+    await expect(first).resolves.toMatchObject({ scanId: "scan-1" });
+    expect(fixture.collectReport).toHaveBeenCalledOnce();
+  });
+
+  it("does not let one installation's running scan block another installation", async () => {
+    const fixture = createFixture();
+
+    await runManualScan(installation, fixture.dependencies);
+
+    await expect(runManualScan(otherInstallation, fixture.dependencies)).resolves.toMatchObject({
+      authorizedAppId: "app-2",
+    });
+  });
+
+  it("releases the lease after a successful scan so the merchant can re-scan", async () => {
+    const fixture = createFixture();
+
+    await runManualScan(installation, fixture.dependencies);
+
+    await expect(runManualScan(installation, fixture.dependencies)).resolves.toMatchObject({
+      scanId: "scan-2",
+    });
+  });
+
+  it.each([
+    { name: "a scan-limit failure", error: new IkasUpstreamError("IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED") },
+    { name: "an upstream transport failure", error: new IkasUpstreamError("IKAS_UPSTREAM_HTTP_ERROR") },
+    { name: "an authentication failure", error: new IkasAuthenticationError("IKAS_AUTHENTICATION_FAILED") },
+  ])("leaves the previous successful snapshot intact after $name", async ({ error }) => {
+    const fixture = createFixture(vi.fn().mockRejectedValue(error));
+    await fixture.snapshotStore.putLatest(previousSnapshot());
+    const putLatest = vi.spyOn(fixture.snapshotStore, "putLatest");
+
+    await expect(runManualScan(installation, fixture.dependencies)).rejects.toBe(error);
+
+    expect(putLatest).not.toHaveBeenCalled();
+    await expect(fixture.snapshotStore.getLatest(installation)).resolves.toEqual(previousSnapshot());
+  });
+
+  it("releases the lease after a failed scan so a retry is possible", async () => {
+    const collectReport = vi
+      .fn()
+      .mockRejectedValueOnce(new IkasUpstreamError("IKAS_UPSTREAM_HTTP_ERROR"))
+      .mockResolvedValueOnce(reportFor());
+    const fixture = createFixture(collectReport);
+
+    await expect(runManualScan(installation, fixture.dependencies)).rejects.toBeInstanceOf(
+      IkasUpstreamError,
+    );
+
+    // The failed attempt never reached snapshot creation, so the retry takes the first id.
+    await expect(runManualScan(installation, fixture.dependencies)).resolves.toMatchObject({
+      scanId: "scan-1",
+    });
+  });
+
+  it("holds the lease past the full catalog scan budget plus the snapshot write", async () => {
+    // A lease that can expire mid-scan lets a second scan start and race the first one's
+    // write, so the TTL has to outlast the worst-case scan by a real margin.
+    expect(SCAN_LEASE_TTL_MS).toBeGreaterThanOrEqual(PRODUCT_SCAN_MAX_DURATION_MS * 2);
+
+    const fixture = createFixture();
+    const acquireScanLease = vi.spyOn(fixture.snapshotStore, "acquireScanLease");
+
+    await runManualScan(installation, fixture.dependencies);
+
+    expect(acquireScanLease).toHaveBeenCalledWith(
+      expect.objectContaining({ authorizedAppId: "app-1" }),
+      expect.any(String),
+      SCAN_LEASE_TTL_MS,
+    );
+  });
+
+  it("surfaces a snapshot write failure instead of reporting a scan that was never stored", async () => {
+    const fixture = createFixture();
+    vi.spyOn(fixture.snapshotStore, "putLatest").mockRejectedValue(new Error("redis down"));
+
+    await expect(runManualScan(installation, fixture.dependencies)).rejects.toThrow("redis down");
+  });
+});
