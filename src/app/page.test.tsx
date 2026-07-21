@@ -1,14 +1,21 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HealthReport } from "@/lib/ikas/types";
-import { IkasUpstreamError } from "@/lib/ikas/errors";
+import type { ScanSnapshot } from "@/lib/scans/snapshot-store";
 
+/**
+ * The report service is deliberately NOT mocked here. The dashboard is wired to the real
+ * read path, and the ikas product adapter is replaced by a spy, so "zero ikas catalog
+ * calls" is proven by an observed call count rather than assumed from a mock boundary.
+ */
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   readInstallationSession: vi.fn(),
-  getProductHealthReport: vi.fn(),
   getIkasLaunchAuthenticationHref: vi.fn(),
   redirect: vi.fn(),
+  getLatestSnapshot: vi.fn(),
+  getIkasToken: vi.fn(),
+  listProducts: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({
@@ -16,12 +23,25 @@ vi.mock("@/lib/session", () => ({
   readInstallationSession: mocks.readInstallationSession,
 }));
 
-vi.mock("@/lib/ikas/report-service", () => ({
-  getProductHealthReport: mocks.getProductHealthReport,
+vi.mock("@/lib/ikas/installation-auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ikas/installation-auth")>()),
+  getIkasLaunchAuthenticationHref: mocks.getIkasLaunchAuthenticationHref,
 }));
 
-vi.mock("@/lib/ikas/installation-auth", () => ({
-  getIkasLaunchAuthenticationHref: mocks.getIkasLaunchAuthenticationHref,
+vi.mock("@/lib/scans/snapshot-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/scans/snapshot-store")>()),
+  getLatestSnapshot: mocks.getLatestSnapshot,
+}));
+
+vi.mock("@/lib/ikas/token-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ikas/token-store")>()),
+  getIkasToken: mocks.getIkasToken,
+}));
+
+vi.mock("@/lib/ikas/product-adapter", () => ({
+  HttpIkasProductAdapter: class {
+    listProducts = mocks.listProducts;
+  },
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
@@ -37,6 +57,8 @@ const installation = {
   merchantId: "merchant-1",
   storeName: "dev-emre2",
 };
+
+const storedToken = { ...installation, accessToken: "access-token" };
 
 const report: HealthReport = {
   generatedAt: "2026-07-18T08:00:00.000Z",
@@ -91,12 +113,27 @@ const report: HealthReport = {
   issues: [],
 };
 
+function snapshotAt(generatedAt: string): ScanSnapshot {
+  return {
+    version: 1,
+    scanId: "scan-1",
+    authorizedAppId: installation.authorizedAppId,
+    merchantId: installation.merchantId,
+    generatedAt,
+    report: { ...report, generatedAt },
+  };
+}
+
+const staleSnapshot = snapshotAt("2026-07-18T08:00:00.000Z");
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getSession.mockResolvedValue(installation);
   mocks.readInstallationSession.mockReturnValue(installation);
-  mocks.getProductHealthReport.mockResolvedValue({ source: "http", report });
+  mocks.getIkasToken.mockResolvedValue(storedToken);
+  mocks.getLatestSnapshot.mockResolvedValue(staleSnapshot);
   mocks.getIkasLaunchAuthenticationHref.mockReturnValue(undefined);
+  mocks.listProducts.mockResolvedValue({ source: "http", products: [] });
 });
 
 async function renderHome(searchParams: Record<string, string> = {}) {
@@ -104,20 +141,33 @@ async function renderHome(searchParams: Record<string, string> = {}) {
   return renderToStaticMarkup(element);
 }
 
-describe("authenticated product health dashboard", () => {
-  it("renders live summary metrics and tenant-safe report actions", async () => {
+describe("dashboard reads the stored snapshot without scanning", () => {
+  it("renders the snapshot report and makes zero ikas catalog calls", async () => {
     const html = await renderHome();
 
     expect(html).toContain("31 (121)");
     expect(html).toContain("82/100");
     expect(html).toContain("Mağaza: dev-emre2");
     expect(html).toContain('href="/api/report.csv"');
-    expect(html).not.toContain("authorizedAppId=");
     expect(html).toContain("https://dev-emre2.myikas.com/admin/product/edit/product-1");
-    expect(mocks.getProductHealthReport).toHaveBeenCalledWith(expect.any(Date), installation);
+    expect(mocks.getLatestSnapshot).toHaveBeenCalledWith({
+      authorizedAppId: "app-1",
+      merchantId: "merchant-1",
+    });
+    expect(mocks.listProducts).not.toHaveBeenCalled();
   });
 
-  it("filters product rows by the selected rule", async () => {
+  it("makes zero ikas catalog calls when the rule filter changes", async () => {
+    await renderHome();
+    await renderHome({ rule: "missing_sku" });
+    await renderHome({ rule: "out_of_stock" });
+    await renderHome({});
+
+    expect(mocks.getLatestSnapshot).toHaveBeenCalledTimes(4);
+    expect(mocks.listProducts).not.toHaveBeenCalled();
+  });
+
+  it("filters product rows by the selected rule from the same snapshot", async () => {
     const html = await renderHome({ rule: "missing_sku" });
 
     expect(html).toContain("SKU Eksik filtresi açık.");
@@ -128,6 +178,7 @@ describe("authenticated product health dashboard", () => {
     expect(html).toContain('aria-current="page"');
     expect(html).toContain('aria-label="SKU Eksik, 1 ürün"');
     expect(html).toContain("Filtreyi temizle");
+    expect(mocks.listProducts).not.toHaveBeenCalled();
   });
 
   it("does not render a clear-filter action when no rule is selected", async () => {
@@ -142,34 +193,164 @@ describe("authenticated product health dashboard", () => {
     expect(html).toContain("overflow-x-auto");
     expect(html).not.toContain("overflow-hidden rounded-2xl");
   });
+});
 
-  it("renders a truthful in-page state when the real report path exceeds scan limits", async () => {
-    mocks.getProductHealthReport.mockRejectedValue(
-      new IkasUpstreamError("IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED"),
-    );
-
+describe("scan freshness and the manual scan action", () => {
+  it("shows the snapshot timestamp as machine-readable scan identity", async () => {
     const html = await renderHome();
 
-    expect(html).toContain("Katalog bu taramanın güvenli sınırlarını aştı");
-    expect(html).toContain("Eksik veya kısmi bir rapor göstermiyoruz");
-    expect(html).toContain("IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED");
-    expect(html).not.toContain("Geçici bir bağlantı");
-    expect(html).not.toContain("Yeniden dene");
+    expect(html).toContain("Son tarama");
+    expect(html).toContain('dateTime="2026-07-18T08:00:00.000Z"');
   });
 
-  it("submits paid-feature interest through a tenant-bound POST instead of a mailto link", async () => {
+  it("offers a manual scan as an explicit tenant-bound POST, never a navigation link", async () => {
     const html = await renderHome();
 
-    expect(html).toContain('action="/api/interest"');
+    expect(html).toContain('action="/api/scans"');
     expect(html).toContain('method="post"');
-    expect(html).toContain('value="low_stock_threshold_monitoring"');
-    expect(html).not.toContain("mailto:");
-    // The tenant is resolved server-side from the session, never posted by the client.
+    expect(html).toContain("Şimdi tara");
+    expect(html).not.toContain('href="/api/scans"');
+    // The tenant is resolved server-side; nothing tenant-identifying is posted.
     expect(html).not.toContain("app-1");
     expect(html).not.toContain("merchant-1");
   });
 
-  it("describes threshold monitoring as planned instead of selling the zero-stock count as a low-stock result", async () => {
+  it("warns that an old snapshot may be out of date", async () => {
+    const html = await renderHome();
+
+    expect(html).toContain("güncelliğini yitirmiş olabilir");
+  });
+
+  it("does not call a fresh snapshot stale", async () => {
+    mocks.getLatestSnapshot.mockResolvedValue(snapshotAt(new Date().toISOString()));
+
+    const html = await renderHome();
+
+    expect(html).not.toContain("güncelliğini yitirmiş olabilir");
+  });
+});
+
+describe("first-scan state", () => {
+  it("asks for an explicit first scan instead of silently scanning on render", async () => {
+    mocks.getLatestSnapshot.mockResolvedValue(undefined);
+
+    const html = await renderHome();
+
+    expect(html).toContain("Henüz tarama yapılmadı");
+    expect(html).toContain('action="/api/scans"');
+    expect(html).toContain("Şimdi tara");
+    expect(html).not.toContain("82/100");
+    expect(mocks.listProducts).not.toHaveBeenCalled();
+  });
+
+  it("does not offer a CSV export before the first scan", async () => {
+    mocks.getLatestSnapshot.mockResolvedValue(undefined);
+
+    const html = await renderHome();
+
+    expect(html).not.toContain('href="/api/report.csv"');
+  });
+});
+
+describe("scan outcome feedback", () => {
+  it("confirms a completed scan", async () => {
+    const html = await renderHome({ scan: "completed" });
+
+    expect(html).toContain("Tarama tamamlandı");
+    expect(mocks.listProducts).not.toHaveBeenCalled();
+  });
+
+  it("explains that a duplicate scan is already running", async () => {
+    const html = await renderHome({ scan: "busy" });
+
+    expect(html).toContain("Bu mağaza için bir tarama zaten sürüyor");
+  });
+
+  it("keeps the previous successful report visible after a scan-limit failure", async () => {
+    const html = await renderHome({ scan: "limit" });
+
+    expect(html).toContain("güvenli sınırlarını aştı");
+    expect(html).toContain("son başarılı taramadan geliyor");
+    // The failed scan must not have replaced the readable report.
+    expect(html).toContain("82/100");
+    expect(html).toContain("Eksik SKU Ürünü");
+  });
+
+  it("keeps the previous successful report visible after a generic scan failure", async () => {
+    const html = await renderHome({ scan: "failed" });
+
+    expect(html).toContain("Tarama tamamlanamadı");
+    expect(html).toContain("82/100");
+  });
+
+  it("does not claim a previous report exists when the first scan fails", async () => {
+    mocks.getLatestSnapshot.mockResolvedValue(undefined);
+
+    const html = await renderHome({ scan: "failed" });
+
+    expect(html).toContain("Tarama tamamlanamadı");
+    expect(html).not.toContain("son başarılı taramadan geliyor");
+    expect(html).toContain("Henüz tarama yapılmadı");
+  });
+
+  it("ignores an unrecognised scan status value", async () => {
+    const html = await renderHome({ scan: "<script>alert(1)</script>" });
+
+    expect(html).not.toContain("alert(1)");
+    expect(html).not.toContain("Tarama tamamlandı");
+  });
+});
+
+describe("tenant-bound access control", () => {
+  it("renders the setup-required screen without reading a snapshot", async () => {
+    mocks.readInstallationSession.mockReturnValue(undefined);
+
+    const html = await renderHome();
+
+    expect(html).toContain("ikas ile güvenli şekilde bağlan");
+    expect(html).toContain('href="/authorize-store"');
+    expect(html.match(/href="\/authorize-store"/g)).toHaveLength(1);
+    expect(html).toContain("Ürün veya stok bilgileri değiştirilmez");
+    expect(html).toContain("bg-slate-50");
+    expect(html).not.toContain("MVP");
+    expect(html).not.toContain("ilk sürüm");
+    expect(mocks.getLatestSnapshot).not.toHaveBeenCalled();
+    expect(mocks.listProducts).not.toHaveBeenCalled();
+  });
+
+  it("asks the merchant to reconnect when the durable token no longer matches the session", async () => {
+    mocks.getIkasToken.mockResolvedValue(undefined);
+
+    const html = await renderHome();
+
+    expect(html).toContain("Mağaza bağlantısını yenile");
+    expect(mocks.getLatestSnapshot).not.toHaveBeenCalled();
+    expect(mocks.listProducts).not.toHaveBeenCalled();
+  });
+
+  it("refuses to render another tenant's snapshot", async () => {
+    mocks.getIkasToken.mockResolvedValue({ ...storedToken, merchantId: "merchant-2" });
+
+    const html = await renderHome();
+
+    expect(html).toContain("Mağaza bağlantısını yenile");
+    expect(html).not.toContain("82/100");
+    expect(mocks.getLatestSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+describe("paid-feature interest", () => {
+  it("submits interest through a tenant-bound POST instead of a mailto link", async () => {
+    const html = await renderHome();
+
+    expect(html).toContain('action="/api/interest"');
+    expect(html).toContain('value="low_stock_threshold_monitoring"');
+    expect(html).not.toContain("mailto:");
+    expect(html).not.toContain("app-1");
+    expect(html).not.toContain("merchant-1");
+  });
+
+  it("describes threshold monitoring as planned instead of selling the zero-stock count", async () => {
     const html = await renderHome();
 
     expect(html).toContain("stok dışı satış kapalı");
@@ -190,22 +371,6 @@ describe("authenticated product health dashboard", () => {
     expect(html).not.toContain("İlginizi kaydettik");
     expect(html).not.toContain("alert(1)");
     expect(html).toContain('action="/api/interest"');
-  });
-
-  it("renders the setup-required screen without consulting live report data", async () => {
-    mocks.readInstallationSession.mockReturnValue(undefined);
-
-    const html = await renderHome();
-
-    expect(html).toContain("ikas ile güvenli şekilde bağlan");
-    expect(html).toContain('href="/authorize-store"');
-    expect(html.match(/href="\/authorize-store"/g)).toHaveLength(1);
-    expect(html).toContain("Ürün veya stok bilgileri değiştirilmez");
-    expect(html).toContain("bg-slate-50");
-    expect(html).not.toContain("bg-[#f6f6f7]");
-    expect(html).not.toContain("MVP");
-    expect(html).not.toContain("ilk sürüm");
-    expect(mocks.getProductHealthReport).not.toHaveBeenCalled();
   });
 
   it("does not expose internal prototype language on the dashboard", async () => {

@@ -58,6 +58,17 @@ test("shows a manual-copy fallback when clipboard access is denied", async ({ pa
   await expect(page.getByText("Kod kopyalanamadı. Destek kodunu seçip elle kopyala.")).toBeVisible();
 });
 
+test("refuses to start a scan without an installation session", async ({ request }) => {
+  const response = await request.post("/api/scans", {
+    headers: { origin: "https://attacker.example.com" },
+    data: { authorizedAppId: "attacker-app", merchantId: "attacker-merchant" },
+  });
+
+  expect(response.status()).toBe(401);
+  expect(response.headers()["cache-control"]).toBe("private, no-store");
+  await expect(response.json()).resolves.toEqual({ error: "IKAS_LIVE_AUTH_REQUIRED" });
+});
+
 test("keeps report endpoints private without an installation session", async ({ request }) => {
   for (const path of ["/api/report", "/api/report.csv"]) {
     const response = await request.get(path);
