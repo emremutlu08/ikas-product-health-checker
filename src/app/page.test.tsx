@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HealthReport } from "@/lib/ikas/types";
-import type { ScanSnapshot } from "@/lib/scans/snapshot-store";
+import { SnapshotStoreError, type ScanSnapshot } from "@/lib/scans/snapshot-store";
 
 /**
  * The report service is deliberately NOT mocked here. The dashboard is wired to the real
@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getIkasLaunchAuthenticationHref: vi.fn(),
   redirect: vi.fn(),
   getLatestSnapshot: vi.fn(),
+  hasActiveScanLease: vi.fn(),
   getIkasToken: vi.fn(),
   listProducts: vi.fn(),
 }));
@@ -31,6 +32,7 @@ vi.mock("@/lib/ikas/installation-auth", async (importOriginal) => ({
 vi.mock("@/lib/scans/snapshot-store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/scans/snapshot-store")>()),
   getLatestSnapshot: mocks.getLatestSnapshot,
+  hasActiveScanLease: mocks.hasActiveScanLease,
 }));
 
 vi.mock("@/lib/ikas/token-store", async (importOriginal) => ({
@@ -38,7 +40,10 @@ vi.mock("@/lib/ikas/token-store", async (importOriginal) => ({
   getIkasToken: mocks.getIkasToken,
 }));
 
-vi.mock("@/lib/ikas/product-adapter", () => ({
+// Partial: the scan service reads the real scan-duration budget to size its lease TTL, while
+// the adapter class stays a spy so any catalog call would be observed rather than performed.
+vi.mock("@/lib/ikas/product-adapter", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ikas/product-adapter")>()),
   HttpIkasProductAdapter: class {
     listProducts = mocks.listProducts;
   },
@@ -110,7 +115,36 @@ const report: HealthReport = {
       actionLabel: "İncele",
     },
   ],
-  issues: [],
+  issues: [
+    {
+      code: "missing_sku",
+      severity: "critical",
+      productId: "product-1",
+      productName: "Eksik SKU Ürünü",
+      message: "Aktif varyantta SKU eksik.",
+    },
+    {
+      code: "duplicate_sku",
+      severity: "critical",
+      productId: "product-1",
+      productName: "Eksik SKU Ürünü",
+      message: "SKU başka aktif varyantlarda da kullanılıyor.",
+    },
+    {
+      code: "zero_stock_blocked",
+      severity: "critical",
+      productId: "product-2",
+      productName: "Stoksuz Ürün",
+      message: "Varyant stokta yok ve stok dışı satış kapalı.",
+    },
+    {
+      code: "missing_barcode",
+      severity: "critical",
+      productId: "product-2",
+      productName: "Stoksuz Ürün",
+      message: "Aktif varyantta barkod yok.",
+    },
+  ],
 };
 
 function snapshotAt(generatedAt: string): ScanSnapshot {
@@ -132,6 +166,7 @@ beforeEach(() => {
   mocks.readInstallationSession.mockReturnValue(installation);
   mocks.getIkasToken.mockResolvedValue(storedToken);
   mocks.getLatestSnapshot.mockResolvedValue(staleSnapshot);
+  mocks.hasActiveScanLease.mockResolvedValue(false);
   mocks.getIkasLaunchAuthenticationHref.mockReturnValue(undefined);
   mocks.listProducts.mockResolvedValue({ source: "http", products: [] });
 });
@@ -142,12 +177,14 @@ async function renderHome(searchParams: Record<string, string> = {}) {
 }
 
 describe("dashboard reads the stored snapshot without scanning", () => {
-  it("renders the snapshot report and makes zero ikas catalog calls", async () => {
+  it("composes header, health summary, filters and table from one snapshot", async () => {
     const html = await renderHome();
 
-    expect(html).toContain("31 (121)");
-    expect(html).toContain("82/100");
-    expect(html).toContain("Mağaza: dev-emre2");
+    expect(html).toContain("Ürün Sağlığı");
+    expect(html).toContain("dev-emre2");
+    expect(html).toContain("Sağlık durumu");
+    expect(html).toContain("Kritik sorun");
+    expect(html).toContain("Sorunlu ürünler");
     expect(html).toContain('href="/api/report.csv"');
     expect(html).toContain("https://dev-emre2.myikas.com/admin/product/edit/product-1");
     expect(mocks.getLatestSnapshot).toHaveBeenCalledWith({
@@ -157,26 +194,29 @@ describe("dashboard reads the stored snapshot without scanning", () => {
     expect(mocks.listProducts).not.toHaveBeenCalled();
   });
 
-  it("makes zero ikas catalog calls when the rule filter changes", async () => {
+  it("makes zero ikas catalog calls for any filter, search, sort or page navigation", async () => {
     await renderHome();
     await renderHome({ rule: "missing_sku" });
     await renderHome({ rule: "out_of_stock" });
+    await renderHome({ q: "stoksuz" });
+    await renderHome({ sort: "name" });
+    await renderHome({ page: "2" });
     await renderHome({});
 
-    expect(mocks.getLatestSnapshot).toHaveBeenCalledTimes(4);
+    expect(mocks.getLatestSnapshot).toHaveBeenCalledTimes(7);
     expect(mocks.listProducts).not.toHaveBeenCalled();
   });
 
   it("filters product rows by the selected rule from the same snapshot", async () => {
     const html = await renderHome({ rule: "missing_sku" });
 
-    expect(html).toContain("SKU Eksik filtresi açık.");
+    expect(html).toContain("Filtre: SKU Eksik");
     expect(html).toContain("Eksik SKU Ürünü");
     expect(html).not.toContain("Stoksuz Ürün");
     expect(html).toContain('href="/?rule=missing_sku"');
     expect(html).toContain('aria-label="Kural filtresi"');
     expect(html).toContain('aria-current="page"');
-    expect(html).toContain('aria-label="SKU Eksik, 1 ürün"');
+    expect(html).toContain('aria-label="SKU Eksik, 1 ürün, seçili filtre"');
     expect(html).toContain("Filtreyi temizle");
     expect(mocks.listProducts).not.toHaveBeenCalled();
   });
@@ -187,11 +227,90 @@ describe("dashboard reads the stored snapshot without scanning", () => {
     expect(html).not.toContain("Filtreyi temizle");
   });
 
-  it("keeps the product action reachable in a horizontally scrollable table", async () => {
+  it("narrows the table by the search term in the URL", async () => {
+    const html = await renderHome({ q: "stoksuz" });
+
+    expect(html).toContain("Stoksuz Ürün");
+    expect(html).not.toContain("Eksik SKU Ürünü");
+    expect(html).toContain("Aramayı temizle");
+    expect(mocks.listProducts).not.toHaveBeenCalled();
+  });
+
+  it("combines the rule filter and the search term", async () => {
+    const html = await renderHome({ rule: "missing_sku", q: "stoksuz" });
+
+    expect(html).toContain("aramasıyla eşleşen ürün yok");
+    expect(mocks.listProducts).not.toHaveBeenCalled();
+  });
+
+  it("preserves the active rule while sorting", async () => {
+    const html = await renderHome({ rule: "missing_sku", sort: "name" });
+
+    expect(html).toContain("Sıralama: Ürün adı");
+    expect(html).toContain('href="/?rule=missing_sku&amp;sort=updated"');
+  });
+
+  it("keeps the product table reachable in a horizontally scrollable region", async () => {
     const html = await renderHome();
 
     expect(html).toContain("overflow-x-auto");
-    expect(html).not.toContain("overflow-hidden rounded-2xl");
+    expect(html).not.toContain("overflow-hidden");
+    expect(html).toContain("yatay kaydır");
+  });
+});
+
+describe("health summary replaces the oversized KPI cards", () => {
+  it("shows a size-comparable score with its state in words", async () => {
+    const html = await renderHome();
+
+    // 4 critical issues over 31 products is 0.9 weighted points per product.
+    expect(html).toContain("95");
+    expect(html).toContain("/100");
+    expect(html).toContain("İyi durumda");
+  });
+
+  it("no longer shows the un-normalized stored score", async () => {
+    const html = await renderHome();
+
+    expect(html).not.toContain("82/100");
+  });
+
+  it("publishes how the score is produced", async () => {
+    const html = await renderHome();
+
+    expect(html).toContain("Skor nasıl hesaplanır?");
+    expect(html).toContain("gerçek mağazalardan ölçülmüş bir dağılıma değil");
+  });
+
+  it("shows no change-since-last-scan, because only the latest snapshot is stored", async () => {
+    const html = await renderHome();
+
+    for (const trend of ["Önceki tarama", "geçen taramaya göre", "▲", "▼"]) {
+      expect(html).not.toContain(trend);
+    }
+  });
+
+  it("scores a store with no products as unscoreable rather than perfect", async () => {
+    mocks.getLatestSnapshot.mockResolvedValue({
+      ...staleSnapshot,
+      report: {
+        ...report,
+        productCount: 0,
+        variantCount: 0,
+        affectedProductCount: 0,
+        criticalCount: 0,
+        issueCount: 0,
+        issues: [],
+        productRows: [],
+        generatedAt: staleSnapshot.generatedAt,
+      },
+    });
+
+    const html = await renderHome();
+
+    expect(html).toContain("Taranacak ürün yok");
+    expect(html).not.toContain("100/100");
+    expect(html).toContain("Mağazanızda taranacak ürün bulunamadı");
   });
 });
 
@@ -213,6 +332,64 @@ describe("scan freshness and the manual scan action", () => {
     // The tenant is resolved server-side; nothing tenant-identifying is posted.
     expect(html).not.toContain("app-1");
     expect(html).not.toContain("merchant-1");
+  });
+
+  it("blocks a second scan submission while one is already running", async () => {
+    const html = await renderHome({ scan: "busy" });
+
+    expect(html).toContain('disabled=""');
+    expect(html).toContain("Tarama sürüyor");
+  });
+
+  /**
+   * `?scan=busy` only survives one redirect: reload the dashboard and it is gone, so a button
+   * disabled by that alone goes live again while the scan is still running. The real state
+   * lives in the Redis lease, and that is what the control has to derive from.
+   */
+  it("blocks the scan action on a fresh load while the lease is actually held", async () => {
+    mocks.hasActiveScanLease.mockResolvedValue(true);
+
+    const html = await renderHome();
+
+    expect(html).toContain('disabled=""');
+    expect(html).toContain("Tarama sürüyor");
+    expect(html).not.toContain("Şimdi tara");
+  });
+
+  it("reads the lease for the session tenant only, never a URL-supplied one", async () => {
+    await renderHome({ authorizedAppId: "attacker-app", merchantId: "attacker-merchant" });
+
+    expect(mocks.hasActiveScanLease).toHaveBeenCalledWith({
+      authorizedAppId: "app-1",
+      merchantId: "merchant-1",
+    });
+  });
+
+  it("answers the lease question from Redis alone, never from the ikas catalog", async () => {
+    mocks.hasActiveScanLease.mockResolvedValue(true);
+
+    await renderHome();
+
+    expect(mocks.hasActiveScanLease).toHaveBeenCalledOnce();
+    expect(mocks.listProducts).not.toHaveBeenCalled();
+  });
+
+  it("keeps the scan action live when no lease is held", async () => {
+    const html = await renderHome();
+
+    expect(html).toContain("Şimdi tara");
+    expect(html).not.toContain('disabled=""');
+  });
+
+  it("still renders the dashboard when the lease store cannot be reached", async () => {
+    mocks.hasActiveScanLease.mockRejectedValue(new SnapshotStoreError("backend", "lease"));
+
+    const html = await renderHome();
+
+    // The server-side 409 remains the authoritative duplicate-scan guard, so an unreadable
+    // lease degrades to a live button rather than an unrenderable page.
+    expect(html).toContain("Şimdi tara");
+    expect(html).toContain("Sorunlu ürünler");
   });
 
   it("warns that an old snapshot may be out of date", async () => {
@@ -239,7 +416,7 @@ describe("first-scan state", () => {
     expect(html).toContain("Henüz tarama yapılmadı");
     expect(html).toContain('action="/api/scans"');
     expect(html).toContain("Şimdi tara");
-    expect(html).not.toContain("82/100");
+    expect(html).not.toContain("/100");
     expect(mocks.listProducts).not.toHaveBeenCalled();
   });
 
@@ -249,6 +426,17 @@ describe("first-scan state", () => {
     const html = await renderHome();
 
     expect(html).not.toContain('href="/api/report.csv"');
+  });
+
+  it("disables the first scan while that first scan is already running", async () => {
+    mocks.getLatestSnapshot.mockResolvedValue(undefined);
+    mocks.hasActiveScanLease.mockResolvedValue(true);
+
+    const html = await renderHome();
+
+    expect(html).toContain('disabled=""');
+    expect(html).toContain("Tarama sürüyor");
+    expect(html).not.toContain("Şimdi tara");
   });
 });
 
@@ -272,7 +460,6 @@ describe("scan outcome feedback", () => {
     expect(html).toContain("güvenli sınırlarını aştı");
     expect(html).toContain("son başarılı taramadan geliyor");
     // The failed scan must not have replaced the readable report.
-    expect(html).toContain("82/100");
     expect(html).toContain("Eksik SKU Ürünü");
   });
 
@@ -280,7 +467,7 @@ describe("scan outcome feedback", () => {
     const html = await renderHome({ scan: "failed" });
 
     expect(html).toContain("Tarama tamamlanamadı");
-    expect(html).toContain("82/100");
+    expect(html).toContain("Eksik SKU Ürünü");
   });
 
   it("does not claim a previous report exists when the first scan fails", async () => {
@@ -301,6 +488,24 @@ describe("scan outcome feedback", () => {
   });
 });
 
+describe("URL input is validated rather than trusted", () => {
+  it("ignores an unknown rule, sort and page instead of rendering them", async () => {
+    const html = await renderHome({ rule: "../secret", sort: "'; DROP", page: "-3" });
+
+    expect(html).not.toContain("../secret");
+    expect(html).not.toContain("DROP");
+    expect(html).toContain("Tüm sorunlu ürünler gösteriliyor");
+    expect(html).toContain("Eksik SKU Ürünü");
+  });
+
+  it("escapes a hostile search term instead of executing it", async () => {
+    const html = await renderHome({ q: "<script>alert(1)</script>" });
+
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("aramasıyla eşleşen ürün yok");
+  });
+});
+
 describe("tenant-bound access control", () => {
   it("renders the setup-required screen without reading a snapshot", async () => {
     mocks.readInstallationSession.mockReturnValue(undefined);
@@ -311,7 +516,7 @@ describe("tenant-bound access control", () => {
     expect(html).toContain('href="/authorize-store"');
     expect(html.match(/href="\/authorize-store"/g)).toHaveLength(1);
     expect(html).toContain("Ürün veya stok bilgileri değiştirilmez");
-    expect(html).toContain("bg-slate-50");
+    expect(html).toContain("bg-canvas");
     expect(html).not.toContain("MVP");
     expect(html).not.toContain("ilk sürüm");
     expect(mocks.getLatestSnapshot).not.toHaveBeenCalled();
@@ -334,7 +539,7 @@ describe("tenant-bound access control", () => {
     const html = await renderHome();
 
     expect(html).toContain("Mağaza bağlantısını yenile");
-    expect(html).not.toContain("82/100");
+    expect(html).not.toContain("Sorunlu ürünler");
     expect(mocks.getLatestSnapshot).not.toHaveBeenCalled();
   });
 });
@@ -350,12 +555,34 @@ describe("paid-feature interest", () => {
     expect(html).not.toContain("merchant-1");
   });
 
-  it("describes threshold monitoring as planned instead of selling the zero-stock count", async () => {
+  /**
+   * The count beside this section is the hard blocked-sale count the scan measures. Threshold
+   * tracking is not running, so the copy has to say that in a merchant's words without either
+   * implying the threshold is already watched or reading like an internal roadmap entry.
+   */
+  it("states plainly what the count is and that threshold tracking is not running yet", async () => {
     const html = await renderHome();
 
     expect(html).toContain("stok dışı satış kapalı");
-    expect(html).toContain("Planlanan ücretli özellik");
+    expect(html).toContain("Düşük stok uyarısı henüz kullanılamıyor");
+    // The count is the blocked-sale count, and the copy has to say which one it is not.
+    expect(html).toContain("belirlediğiniz bir stok eşiğine göre değil");
+    expect(html).toContain("stoğu tamamen bitmiş");
     expect(html).not.toContain("stok riski bulundu");
+  });
+
+  it("keeps the read-only promise on this section in customer-facing words", async () => {
+    const html = await renderHome();
+
+    expect(html).toContain("Stok ve ürün bilgileriniz değiştirilmez");
+  });
+
+  it("uses no internal roadmap language to describe the feature", async () => {
+    const html = await renderHome();
+
+    for (const phrase of ["Planlanan ücretli özellik", "V1", "roadmap", "yol haritası", "faz"]) {
+      expect(html).not.toContain(phrase);
+    }
   });
 
   it("shows a safe thank-you status after the interest redirect", async () => {
@@ -380,5 +607,13 @@ describe("paid-feature interest", () => {
     expect(html).not.toContain("ilk sürüm");
     expect(html).not.toContain("Ücretli MVP sinyali");
     expect(html).not.toContain("☆☆☆☆☆");
+  });
+});
+
+describe("the dashboard uses the shared design system", () => {
+  it("references semantic tokens rather than ad-hoc palette steps", async () => {
+    const html = await renderHome();
+
+    expect(html).not.toMatch(/(slate|orange|violet|emerald|amber)-\d{2,3}/);
   });
 });

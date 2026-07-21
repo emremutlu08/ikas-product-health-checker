@@ -32,7 +32,20 @@ const installation = {
   storeName: "session-store",
 };
 
-const report = { score: 100, issues: [] } as unknown as HealthReport;
+/**
+ * `score` here is the legacy value a stored snapshot still carries. The counts beside it are
+ * what the published health model is actually derived from, so the two deliberately disagree:
+ * that disagreement is the thing these tests exist to pin down.
+ */
+const report = {
+  score: 82,
+  productCount: 31,
+  affectedProductCount: 2,
+  criticalCount: 4,
+  warningCount: 0,
+  infoCount: 0,
+  issues: [],
+} as unknown as HealthReport;
 
 const snapshot = {
   version: 1 as const,
@@ -67,10 +80,56 @@ describe("tenant-bound report routes read the stored snapshot", () => {
     const response = await getJsonReport(new Request("https://health.example.com/api/report"));
 
     const body = await response.json();
-    expect(body).toEqual({ scanId: "scan-1", generatedAt: "2026-07-20T08:00:00.000Z", report });
+    expect(body.scanId).toBe("scan-1");
+    expect(body.generatedAt).toBe("2026-07-20T08:00:00.000Z");
     expect(JSON.stringify(body)).not.toContain("session-app");
     expect(JSON.stringify(body)).not.toContain("session-merchant");
     expect(mocks.collectProductHealthReport).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A merchant reading the JSON report and a merchant reading the dashboard are looking at one
+   * scan and must see one health number. The dashboard renders `assessHealth(report)`; this
+   * route published the snapshot's legacy `score` instead, so the same snapshot showed 95 on
+   * screen and 82 over the API.
+   */
+  it("publishes the same normalized health model the dashboard renders", async () => {
+    const response = await getJsonReport(new Request("https://health.example.com/api/report"));
+
+    const body = await response.json();
+    // 4 critical issues x weight 7, over 31 products, against the 20-point ceiling.
+    expect(body.health).toMatchObject({ score: 95, state: "good", productCount: 31 });
+  });
+
+  it("leaves no second, contradicting score on the merchant-visible response", async () => {
+    const response = await getJsonReport(new Request("https://health.example.com/api/report"));
+
+    const body = await response.json();
+    expect(body.report).not.toHaveProperty("score");
+    expect(JSON.stringify(body)).not.toContain('"score":82');
+  });
+
+  it("publishes a null score for a store with no products rather than a flattering number", async () => {
+    mocks.getLatestProductHealthReport.mockResolvedValue({
+      source: "snapshot",
+      snapshot: {
+        ...snapshot,
+        report: {
+          ...report,
+          score: 100,
+          productCount: 0,
+          affectedProductCount: 0,
+          criticalCount: 0,
+        } as unknown as HealthReport,
+      },
+    });
+
+    const response = await getJsonReport(new Request("https://health.example.com/api/report"));
+
+    const body = await response.json();
+    expect(body.health.score).toBeNull();
+    expect(body.health.state).toBe("unknown");
+    expect(body.report).not.toHaveProperty("score");
   });
 
   it("reports a missing snapshot instead of silently starting a scan", async () => {

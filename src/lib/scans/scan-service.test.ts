@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IkasAuthenticationError, IkasUpstreamError } from "@/lib/ikas/errors";
 import { PRODUCT_SCAN_MAX_DURATION_MS } from "@/lib/ikas/product-adapter";
 import type { HealthReport } from "@/lib/ikas/types";
-import { MemorySnapshotStore, type ScanSnapshot } from "./snapshot-store";
+import { MemorySnapshotStore, SnapshotStoreError, type ScanSnapshot } from "./snapshot-store";
 import {
+  isScanRunning,
   runManualScan,
   SCAN_LEASE_TTL_MS,
   ScanBusyError,
@@ -242,5 +243,73 @@ describe("runManualScan", () => {
     vi.spyOn(fixture.snapshotStore, "putLatest").mockRejectedValue(new Error("redis down"));
 
     await expect(runManualScan(installation, fixture.dependencies)).rejects.toThrow("redis down");
+  });
+});
+
+/**
+ * The read-only counterpart to the lease `runManualScan` takes. It exists so a merchant sees
+ * `Tarama sürüyor` on a fresh page load rather than only after being bounced back with
+ * `?scan=busy`, and it deliberately touches nothing but Redis.
+ */
+describe("isScanRunning", () => {
+  it("reports a scan that another request is currently holding the lease for", async () => {
+    const snapshotStore = new MemorySnapshotStore();
+    await snapshotStore.acquireScanLease(installation, "owner-1", 30_000);
+
+    await expect(isScanRunning(installation, { snapshotStore })).resolves.toBe(true);
+  });
+
+  it("reports no scan when the installation holds no lease", async () => {
+    const snapshotStore = new MemorySnapshotStore();
+
+    await expect(isScanRunning(installation, { snapshotStore })).resolves.toBe(false);
+  });
+
+  it("reads the lease for the session installation only, never a caller-supplied tenant", async () => {
+    const snapshotStore = new MemorySnapshotStore();
+    const hasActiveScanLease = vi.spyOn(snapshotStore, "hasActiveScanLease");
+    await snapshotStore.acquireScanLease(otherInstallation, "owner-1", 30_000);
+
+    await expect(isScanRunning(installation, { snapshotStore })).resolves.toBe(false);
+    expect(hasActiveScanLease).toHaveBeenCalledWith({
+      authorizedAppId: "app-1",
+      merchantId: "merchant-1",
+    });
+    // The store name travels in the session but is not part of the tenant key.
+    expect(hasActiveScanLease.mock.calls[0]?.[0]).not.toHaveProperty("storeName");
+  });
+
+  it("refuses to read a lease without a server-side installation session", async () => {
+    const snapshotStore = new MemorySnapshotStore();
+    const hasActiveScanLease = vi.spyOn(snapshotStore, "hasActiveScanLease");
+
+    await expect(isScanRunning(undefined, { snapshotStore })).rejects.toBeInstanceOf(
+      IkasAuthenticationError,
+    );
+    expect(hasActiveScanLease).not.toHaveBeenCalled();
+  });
+
+  it("never reaches the ikas catalog to answer whether a scan is running", async () => {
+    const snapshotStore = new MemorySnapshotStore();
+    const collectReport = vi.fn();
+    await snapshotStore.acquireScanLease(installation, "owner-1", 30_000);
+
+    await isScanRunning(installation, { snapshotStore });
+
+    expect(collectReport).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A lease read is an affordance, not a guarantee: `POST /api/scans` still refuses a duplicate
+   * with its own `SET NX`. So an unreachable store degrades to "not known to be running" and
+   * leaves the button live, rather than failing the whole dashboard render.
+   */
+  it("degrades to no-known-scan when the lease store is unreachable", async () => {
+    const snapshotStore = new MemorySnapshotStore();
+    vi.spyOn(snapshotStore, "hasActiveScanLease").mockRejectedValue(
+      new SnapshotStoreError("backend", "lease"),
+    );
+
+    await expect(isScanRunning(installation, { snapshotStore })).resolves.toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assessHealth } from "@/lib/health/health-model";
 import { IkasAuthenticationError, IkasUpstreamError } from "@/lib/ikas/errors";
 import { IkasTokenRefreshError, TokenStoreError } from "@/lib/ikas/token-store";
 import { SnapshotStoreError } from "@/lib/scans/snapshot-store";
@@ -99,7 +100,20 @@ describe("POST /api/scans authentication and origin protection", () => {
     expect(mocks.runManualScan).toHaveBeenCalledWith(installation);
 
     const body = await response.json();
-    expect(body).toEqual({ scanId: "scan-1", generatedAt: "2026-07-20T08:00:00.000Z", report });
+    // The same normalized model the dashboard renders, not the legacy persisted score. Compared
+    // against `assessHealth` itself rather than a copied literal, so this test cannot drift away
+    // from the model the dashboard uses.
+    const { score: _legacyScore, ...safeReport } = report;
+    void _legacyScore;
+    expect(body).toEqual({
+      scanId: "scan-1",
+      generatedAt: "2026-07-20T08:00:00.000Z",
+      health: assessHealth(report),
+      report: safeReport,
+    });
+    // Exactly one merchant-visible score: the un-normalized 82 must not survive anywhere.
+    expect(body.report).not.toHaveProperty("score");
+    expect(JSON.stringify(body)).not.toContain('"score":82');
     // Tenant identifiers must never travel back to the client.
     expect(JSON.stringify(body)).not.toContain("session-app");
     expect(JSON.stringify(body)).not.toContain("session-merchant");

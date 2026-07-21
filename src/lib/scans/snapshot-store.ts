@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { assessHealth, type HealthAssessment } from "@/lib/health/health-model";
 import { ISSUE_TO_RULE, MISTAKE_RULE_CODES, RULE_LABELS } from "@/lib/ikas/health-rules";
 import { TOKEN_STORE_ENV_KEYS } from "@/lib/ikas/token-store";
 import type { HealthIssueCode, HealthReport, MistakeRuleCode } from "@/lib/ikas/types";
@@ -287,11 +288,22 @@ export type ScanSnapshot = {
   report: HealthReport;
 };
 
-/** Snapshot fields that are safe to send to a client: no tenant identifiers. */
+/**
+ * Snapshot fields that are safe to send to a client: no tenant identifiers, and exactly one
+ * health score.
+ *
+ * The stored report keeps the `score` it was written with, because rewriting historical
+ * snapshots to a new formula would falsify what those scans actually recorded. That number is
+ * not the one a merchant sees. `health` carries the current model — the same `assessHealth`
+ * result the dashboard renders — and the legacy field is dropped from `report` on the way out,
+ * so one scan can never be published with two contradicting health values.
+ */
 export type SafeScanSnapshot = {
   scanId: string;
   generatedAt: string;
-  report: HealthReport;
+  /** The published health result. `score` is null when there is nothing to score. */
+  health: HealthAssessment;
+  report: Omit<HealthReport, "score">;
 };
 
 export type SnapshotTenant = {
@@ -316,6 +328,15 @@ export interface SnapshotStore {
   listHistory(tenant: SnapshotTenant): Promise<ScanSnapshot[]>;
   acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number): Promise<ScanLease | undefined>;
   releaseScanLease(lease: ScanLease): Promise<boolean>;
+  /**
+   * Read-only view of whether this installation currently holds a scan lease.
+   *
+   * Deliberately returns a boolean rather than the lease: the owner id is an internal
+   * concurrency token and nothing outside the scan path has any use for it. Acquiring the
+   * lease stays the only operation that decides a race; this one only lets a surface show
+   * what is already true.
+   */
+  hasActiveScanLease(tenant: SnapshotTenant): Promise<boolean>;
 }
 
 export type SnapshotStoreErrorCode =
@@ -464,7 +485,16 @@ function validateLease(lease: ScanLease): ScanLease {
 }
 
 export function toSafeSnapshot(snapshot: ScanSnapshot): SafeScanSnapshot {
-  return { scanId: snapshot.scanId, generatedAt: snapshot.generatedAt, report: snapshot.report };
+  // Destructured off rather than deleted, so the stored record is left untouched.
+  const { score: _legacyScore, ...report } = snapshot.report;
+  void _legacyScore;
+
+  return {
+    scanId: snapshot.scanId,
+    generatedAt: snapshot.generatedAt,
+    health: assessHealth(snapshot.report),
+    report,
+  };
 }
 
 /** A snapshot older than this is still served, but labelled as possibly out of date. */
@@ -609,6 +639,16 @@ export class RedisRestSnapshotStore implements SnapshotStore {
     if (result !== 0 && result !== 1) throw new SnapshotStoreError("backend", "lease");
     return result === 1;
   }
+
+  async hasActiveScanLease(tenant: SnapshotTenant) {
+    const validated = validateTenant(tenant, "lease");
+    // Redis expires the key itself, so presence is the whole answer and the stored owner id
+    // never leaves this method.
+    const result = await this.command(["GET", leaseKey(validated)], "lease");
+    if (result === null) return false;
+    if (typeof result !== "string") throw new SnapshotStoreError("backend", "lease");
+    return true;
+  }
 }
 
 type LocalLease = ScanLease & { expiresAt: number };
@@ -682,6 +722,11 @@ export class MemorySnapshotStore implements SnapshotStore {
     this.leases.delete(key);
     return true;
   }
+
+  async hasActiveScanLease(tenant: SnapshotTenant) {
+    const validated = validateTenant(tenant, "lease");
+    return Boolean(this.activeLease(leaseKey(validated)));
+  }
 }
 
 function environmentValue(env: Environment, key: string) {
@@ -747,4 +792,8 @@ export async function acquireScanLease(tenant: SnapshotTenant, ownerId: string, 
 
 export async function releaseScanLease(lease: ScanLease) {
   return snapshotStore().releaseScanLease(lease);
+}
+
+export async function hasActiveScanLease(tenant: SnapshotTenant) {
+  return snapshotStore().hasActiveScanLease(tenant);
 }

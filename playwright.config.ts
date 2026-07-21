@@ -22,7 +22,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `pnpm dev --hostname 127.0.0.1 --port ${port}`,
+    command: `./node_modules/.bin/next dev --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,
