@@ -20,6 +20,7 @@ const ISSUE_CODES: HealthIssueCode[] = [
   "missing_brand",
   "missing_vendor",
   "zero_stock_blocked",
+  "low_stock",
   "missing_price",
   "duplicate_title",
   "weird_description",
@@ -137,7 +138,26 @@ function addIssue(
   });
 }
 
-export function buildHealthReport(products: IkasProduct[], now = new Date(), options: { merchantId?: string } = {}): HealthReport {
+export type HealthReportOptions = {
+  merchantId?: string;
+  /** 0 disables low-stock warnings. */
+  lowStockThreshold?: number;
+};
+
+export function buildHealthReport(
+  products: IkasProduct[],
+  now = new Date(),
+  options: HealthReportOptions = {},
+): HealthReport {
+  const lowStockThreshold = options.lowStockThreshold ?? 0;
+  if (
+    !Number.isSafeInteger(lowStockThreshold) ||
+    lowStockThreshold < 0 ||
+    lowStockThreshold > 1_000
+  ) {
+    throw new RangeError("IKAS_LOW_STOCK_THRESHOLD_INVALID");
+  }
+
   const visibleProducts = activeProducts(products);
   const issues: HealthIssue[] = [];
   const skuIndex = new Map<string, Array<{ product: IkasProduct; variant: IkasProductVariant }>>();
@@ -204,6 +224,17 @@ export function buildHealthReport(products: IkasProduct[], now = new Date(), opt
           "zero_stock_blocked",
           "critical",
           "Varyant stokta yok ve stok dışı satış kapalı.",
+          variant,
+          stock,
+        );
+      }
+      if (lowStockThreshold > 0 && stock > 0 && stock <= lowStockThreshold) {
+        addIssue(
+          issues,
+          product,
+          "low_stock",
+          "warning",
+          `Varyant stoğu belirlenen ${lowStockThreshold} eşiğinde veya altında.`,
           variant,
           stock,
         );

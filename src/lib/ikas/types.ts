@@ -80,6 +80,7 @@ export type HealthIssueCode =
   | "missing_brand"
   | "missing_vendor"
   | "zero_stock_blocked"
+  | "low_stock"
   | "missing_price"
   | "duplicate_title"
   | "weird_description";

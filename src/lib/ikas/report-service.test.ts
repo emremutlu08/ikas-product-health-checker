@@ -43,6 +43,7 @@ const report: HealthReport = {
     missing_brand: 0,
     missing_vendor: 0,
     zero_stock_blocked: 0,
+    low_stock: 0,
     missing_price: 0,
     duplicate_title: 0,
     weird_description: 0,
@@ -107,6 +108,7 @@ describe("collectProductHealthReport authentication lifecycle", () => {
     const result = await collectProductHealthReport(
       new Date("2026-07-13T10:00:00.000Z"),
       installation,
+      {},
       fixture.dependencies,
     );
 
@@ -115,13 +117,89 @@ describe("collectProductHealthReport authentication lifecycle", () => {
     expect(fixture.listProducts).toHaveBeenCalledOnce();
   });
 
+  it("passes the caller's low-stock threshold through to the health report", async () => {
+    const lowStockVariant = {
+      id: "variant-1",
+      sku: "SKU-1",
+      isActive: true,
+      deleted: false,
+      barcodeList: ["BAR-1"],
+      images: [{ imageId: "img-1" }],
+      prices: [{ sellPrice: 10 }],
+      stocks: [{ stockCount: 3, deleted: false }],
+    };
+    const product = {
+      id: "product-1",
+      name: "Az Stoklu Ürün",
+      description: "Yeterince uzun bir ürün açıklaması burada yer alıyor.",
+      categories: [{ id: "c1" }],
+      brand: { id: "b1" },
+      vendor: { id: "v1" },
+      deleted: false,
+      variants: [lowStockVariant],
+    };
+    const fixture = createScanDependencies(
+      vi.fn().mockResolvedValue({ source: "http", products: [product] }),
+    );
+
+    const result = await collectProductHealthReport(
+      new Date("2026-07-20T08:00:00.000Z"),
+      installation,
+      { lowStockThreshold: 5 },
+      fixture.dependencies,
+    );
+
+    expect(result.issueCountsByCode.low_stock).toBe(1);
+    expect(result.issues.some((issue) => issue.code === "low_stock")).toBe(true);
+  });
+
+  it("does not flag low stock when the caller passes no threshold", async () => {
+    const lowStockVariant = {
+      id: "variant-1",
+      sku: "SKU-1",
+      isActive: true,
+      deleted: false,
+      barcodeList: ["BAR-1"],
+      images: [{ imageId: "img-1" }],
+      prices: [{ sellPrice: 10 }],
+      stocks: [{ stockCount: 3, deleted: false }],
+    };
+    const product = {
+      id: "product-1",
+      name: "Az Stoklu Ürün",
+      description: "Yeterince uzun bir ürün açıklaması burada yer alıyor.",
+      categories: [{ id: "c1" }],
+      brand: { id: "b1" },
+      vendor: { id: "v1" },
+      deleted: false,
+      variants: [lowStockVariant],
+    };
+    const fixture = createScanDependencies(
+      vi.fn().mockResolvedValue({ source: "http", products: [product] }),
+    );
+
+    const result = await collectProductHealthReport(
+      new Date("2026-07-20T08:00:00.000Z"),
+      installation,
+      {},
+      fixture.dependencies,
+    );
+
+    expect(result.issueCountsByCode.low_stock).toBe(0);
+  });
+
   it("invalidates a token only after a confirmed API authentication failure", async () => {
     const fixture = createScanDependencies(
       vi.fn().mockRejectedValue(new IkasAuthenticationError("IKAS_AUTHENTICATION_FAILED")),
     );
 
     await expect(
-      collectProductHealthReport(new Date(), installation, fixture.dependencies),
+      collectProductHealthReport(
+      new Date(),
+      installation,
+      {},
+      fixture.dependencies,
+    ),
     ).rejects.toBeInstanceOf(IkasAuthenticationError);
     expect(fixture.invalidateToken).toHaveBeenCalledWith(storedToken.authorizedAppId, storedToken);
   });
@@ -132,7 +210,12 @@ describe("collectProductHealthReport authentication lifecycle", () => {
     );
 
     await expect(
-      collectProductHealthReport(new Date(), installation, fixture.dependencies),
+      collectProductHealthReport(
+      new Date(),
+      installation,
+      {},
+      fixture.dependencies,
+    ),
     ).rejects.toBeInstanceOf(IkasUpstreamError);
     expect(fixture.invalidateToken).not.toHaveBeenCalled();
   });
@@ -142,7 +225,12 @@ describe("collectProductHealthReport authentication lifecycle", () => {
     fixture.getToken.mockRejectedValue(new TokenStoreError("backend", "get"));
 
     await expect(
-      collectProductHealthReport(new Date(), installation, fixture.dependencies),
+      collectProductHealthReport(
+      new Date(),
+      installation,
+      {},
+      fixture.dependencies,
+    ),
     ).rejects.toMatchObject({ code: "backend", operation: "get" });
     expect(fixture.createAdapter).not.toHaveBeenCalled();
     expect(fixture.invalidateToken).not.toHaveBeenCalled();
@@ -152,7 +240,12 @@ describe("collectProductHealthReport authentication lifecycle", () => {
     const fixture = createScanDependencies();
 
     await expect(
-      collectProductHealthReport(new Date(), undefined, fixture.dependencies),
+      collectProductHealthReport(
+      new Date(),
+      undefined,
+      {},
+      fixture.dependencies,
+    ),
     ).rejects.toMatchObject({ code: "IKAS_LIVE_AUTH_REQUIRED" });
     expect(fixture.getToken).not.toHaveBeenCalled();
     expect(fixture.createAdapter).not.toHaveBeenCalled();
@@ -163,7 +256,12 @@ describe("collectProductHealthReport authentication lifecycle", () => {
     fixture.getToken.mockResolvedValue(undefined);
 
     await expect(
-      collectProductHealthReport(new Date(), installation, fixture.dependencies),
+      collectProductHealthReport(
+      new Date(),
+      installation,
+      {},
+      fixture.dependencies,
+    ),
     ).rejects.toMatchObject({ code: "IKAS_LIVE_AUTH_REQUIRED" });
     expect(fixture.getToken).toHaveBeenCalledWith(installation.authorizedAppId);
     expect(fixture.createAdapter).not.toHaveBeenCalled();
@@ -178,7 +276,12 @@ describe("collectProductHealthReport authentication lifecycle", () => {
     fixture.getToken.mockResolvedValue({ ...storedToken, ...override });
 
     await expect(
-      collectProductHealthReport(new Date(), installation, fixture.dependencies),
+      collectProductHealthReport(
+      new Date(),
+      installation,
+      {},
+      fixture.dependencies,
+    ),
     ).rejects.toMatchObject({ code: "IKAS_LIVE_AUTH_REQUIRED" });
     expect(fixture.createAdapter).not.toHaveBeenCalled();
     expect(fixture.invalidateToken).not.toHaveBeenCalled();

@@ -33,6 +33,31 @@ describe("buildHealthReport", () => {
     expect(report.score).toBeLessThan(100);
   });
 
+  it("keeps configurable low-stock monitoring disabled by default", () => {
+    expect(report.issueCountsByCode.low_stock).toBe(0);
+    expect(report).not.toHaveProperty("lowStockThreshold");
+  });
+
+  it("adds a separate warning for positive stock at or below the configured threshold", () => {
+    const configured = buildHealthReport(
+      sampleProducts,
+      new Date("2026-07-06T00:00:00.000Z"),
+      { lowStockThreshold: 5 },
+    );
+
+    expect(configured.issueCountsByCode.low_stock).toBe(1);
+    expect(configured.issues).toContainEqual(
+      expect.objectContaining({
+        code: "low_stock",
+        severity: "warning",
+        productId: "prod-003",
+        variantId: "var-004",
+        value: 2,
+      }),
+    );
+    expect(configured.issueCountsByCode.zero_stock_blocked).toBe(1);
+  });
+
   it("reports blocked out-of-stock variants under a name that matches what is measured", () => {
     expect(report.outOfStockBlockedCount).toBe(report.issueCountsByCode.zero_stock_blocked);
     expect(report.outOfStockBlockedCount).toBe(1);

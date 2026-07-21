@@ -27,6 +27,7 @@ const HEALTH_ISSUE_CODES = [
   "missing_brand",
   "missing_vendor",
   "zero_stock_blocked",
+  "low_stock",
   "missing_price",
   "duplicate_title",
   "weird_description",
@@ -120,11 +121,24 @@ const healthReportSchema = z.object({
   // A snapshot records a scan that finished. An in-flight scan has nothing to persist,
   // so a stored "queued" report could only be a partial or corrupted record.
   scanStatus: z.literal("success"),
-  issueCountsByCode: z.object(
-    Object.fromEntries(HEALTH_ISSUE_CODES.map((code) => [code, count])) as {
-      [K in (typeof HEALTH_ISSUE_CODES)[number]]: typeof count;
-    },
-  ),
+  issueCountsByCode: z.object({
+    missing_sku: count,
+    missing_barcode: count,
+    duplicate_sku: count,
+    duplicate_barcode: count,
+    missing_image: count,
+    missing_description: count,
+    missing_category: count,
+    missing_brand: count,
+    missing_vendor: count,
+    zero_stock_blocked: count,
+    // Explicit version-1 migration: records written before this rule existed could not contain
+    // a low_stock issue, so their only truthful value is zero. Every other field stays required.
+    low_stock: count.default(0),
+    missing_price: count,
+    duplicate_title: count,
+    weird_description: count,
+  }),
   criticalCount: count,
   warningCount: count,
   infoCount: count,

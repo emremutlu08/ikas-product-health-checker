@@ -1,4 +1,4 @@
-import { resolveInstallationRetentionPolicy } from "@/lib/billing/runtime-entitlement";
+import { resolveInstallationScanPolicy, type ScanExecutionPolicy } from "@/lib/settings/settings-service";
 import { IkasAuthenticationError } from "@/lib/ikas/errors";
 import type { InstallationIdentity } from "@/lib/ikas/installation-auth";
 import { PRODUCT_SCAN_MAX_DURATION_MS } from "@/lib/ikas/product-adapter";
@@ -9,7 +9,6 @@ import {
   hasActiveScanLease,
   SnapshotStoreError,
   type ScanSnapshot,
-  type SnapshotRetentionPolicy,
   type SnapshotStore,
 } from "./snapshot-store";
 
@@ -43,8 +42,13 @@ export class ScanBusyError extends Error {
 }
 
 export type ManualScanDependencies = {
-  collectReport(now: Date, installation: InstallationIdentity): Promise<HealthReport>;
-  resolveRetention(installation: InstallationIdentity): Promise<SnapshotRetentionPolicy>;
+  collectReport(
+    now: Date,
+    installation: InstallationIdentity,
+    lowStockThreshold: number,
+  ): Promise<HealthReport>;
+  /** One active-Pro decision resolves both history retention and the low-stock threshold. */
+  resolvePolicy(installation: InstallationIdentity): Promise<ScanExecutionPolicy>;
   snapshotStore: SnapshotStore;
   now(): Date;
   createScanId(): string;
@@ -57,8 +61,9 @@ let configuredSnapshotStore: SnapshotStore | undefined;
 function defaultDependencies(): ManualScanDependencies {
   configuredSnapshotStore ??= createSnapshotStore();
   return {
-    collectReport: (now, installation) => collectProductHealthReport(now, installation),
-    resolveRetention: (installation) => resolveInstallationRetentionPolicy(installation),
+    collectReport: (now, installation, lowStockThreshold) =>
+      collectProductHealthReport(now, installation, { lowStockThreshold }),
+    resolvePolicy: (installation) => resolveInstallationScanPolicy(installation),
     snapshotStore: configuredSnapshotStore,
     now: () => new Date(),
     createScanId: () => crypto.randomUUID(),
@@ -81,8 +86,8 @@ export async function runManualScan(
 
   // Licence IO happens before the scan lease so its timeout cannot consume the catalog/write
   // budget. The resolver is fail-closed: anything except an active, tenant-bound Pro grant is
-  // latest-only, while the Free manual scan remains available.
-  const retention = await dependencies.resolveRetention(installation);
+  // latest-only with threshold 0, while the Free manual scan remains available.
+  const policy = await dependencies.resolvePolicy(installation);
 
   const lease = await dependencies.snapshotStore.acquireScanLease(
     tenant,
@@ -93,7 +98,7 @@ export async function runManualScan(
 
   try {
     const now = dependencies.now();
-    const report = await dependencies.collectReport(now, installation);
+    const report = await dependencies.collectReport(now, installation, policy.lowStockThreshold);
 
     const snapshot: ScanSnapshot = {
       version: 1,
@@ -105,7 +110,7 @@ export async function runManualScan(
 
     // Written only after a fully successful upstream read, and guarded by the lease so a
     // scan that lost its lease cannot overwrite a newer snapshot.
-    await dependencies.snapshotStore.putLatest(snapshot, lease, retention);
+    await dependencies.snapshotStore.putLatest(snapshot, lease, policy.retention);
     return snapshot;
   } finally {
     await dependencies.snapshotStore.releaseScanLease(lease).catch(() => undefined);
