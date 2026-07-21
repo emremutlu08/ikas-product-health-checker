@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getLatestSnapshot: vi.fn(),
   hasActiveScanLease: vi.fn(),
   getIkasToken: vi.fn(),
+  resolveInstallationRetentionPolicy: vi.fn(),
   listProducts: vi.fn(),
 }));
 
@@ -33,6 +34,10 @@ vi.mock("@/lib/scans/snapshot-store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/scans/snapshot-store")>()),
   getLatestSnapshot: mocks.getLatestSnapshot,
   hasActiveScanLease: mocks.hasActiveScanLease,
+}));
+
+vi.mock("@/lib/billing/runtime-entitlement", () => ({
+  resolveInstallationRetentionPolicy: mocks.resolveInstallationRetentionPolicy,
 }));
 
 vi.mock("@/lib/ikas/token-store", async (importOriginal) => ({
@@ -204,6 +209,7 @@ describe("dashboard reads the stored snapshot without scanning", () => {
     await renderHome({});
 
     expect(mocks.getLatestSnapshot).toHaveBeenCalledTimes(7);
+    expect(mocks.resolveInstallationRetentionPolicy).not.toHaveBeenCalled();
     expect(mocks.listProducts).not.toHaveBeenCalled();
   });
 

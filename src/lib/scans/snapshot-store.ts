@@ -850,8 +850,19 @@ export async function getLatestSnapshot(tenant: SnapshotTenant) {
   return snapshotStore().getLatest(tenant);
 }
 
-export async function saveLatestSnapshot(snapshot: ScanSnapshot, lease?: ScanLease) {
-  return snapshotStore().putLatest(snapshot, lease);
+export async function saveLatestSnapshot(
+  snapshot: ScanSnapshot,
+  lease?: ScanLease,
+  retention?: SnapshotRetentionPolicy,
+) {
+  return snapshotStore().putLatest(snapshot, lease, retention);
+}
+
+export async function listSnapshotHistory(
+  tenant: SnapshotTenant,
+  retention?: SnapshotRetentionPolicy,
+) {
+  return snapshotStore().listHistory(tenant, retention);
 }
 
 export async function acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number) {
