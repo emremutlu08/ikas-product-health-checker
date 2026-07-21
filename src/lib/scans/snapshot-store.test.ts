@@ -225,9 +225,68 @@ describe("scan snapshot schema", () => {
   it("exposes safe snapshot metadata without tenant identifiers", () => {
     const safe = toSafeSnapshot(snapshotFor());
 
-    expect(safe).toEqual({ scanId: "scan-1", generatedAt: "2026-07-20T08:00:00.000Z", report });
+    expect(safe.scanId).toBe("scan-1");
+    expect(safe.generatedAt).toBe("2026-07-20T08:00:00.000Z");
     expect(JSON.stringify(safe)).not.toContain("app-1");
     expect(JSON.stringify(safe)).not.toContain("merchant-1");
+  });
+
+  /**
+   * The persisted record keeps its original `score` field so snapshots written under the old
+   * formula stay readable, but that number is not the one the dashboard shows. Publishing both
+   * would give a merchant two different health values for one scan, so the public projection
+   * carries exactly one: the normalized assessment, derived here from the same model the
+   * dashboard renders.
+   */
+  it("publishes the normalized health model rather than the persisted legacy score", () => {
+    const safe = toSafeSnapshot(snapshotFor());
+
+    // 2 critical issues x weight 7, over 3 products, against the 20-point ceiling.
+    expect(safe.health.score).toBe(77);
+    expect(safe.health.state).toBe("attention");
+    expect(snapshotFor().report.score).toBe(82);
+  });
+
+  it("leaves no second merchant-visible score in the published report", () => {
+    const safe = toSafeSnapshot(snapshotFor());
+
+    expect(safe.report).not.toHaveProperty("score");
+    expect(JSON.stringify(safe)).not.toContain('"score":82');
+  });
+
+  it("publishes no score for a catalog with nothing to score", () => {
+    const empty = snapshotFor({
+      report: {
+        ...report,
+        score: 100,
+        productCount: 0,
+        affectedProductCount: 0,
+        criticalCount: 0,
+        warningCount: 0,
+        infoCount: 0,
+        issueCount: 0,
+        outOfStockBlockedCount: 0,
+        issueCountsByCode: { ...report.issueCountsByCode, missing_sku: 0, zero_stock_blocked: 0 },
+        ruleSummaries: report.ruleSummaries.map((summary) => ({ ...summary, count: 0 })),
+        productRows: [],
+        issues: [],
+      },
+    });
+
+    const safe = toSafeSnapshot(empty);
+
+    expect(safe.health.score).toBeNull();
+    expect(safe.health.state).toBe("unknown");
+    expect(safe.report).not.toHaveProperty("score");
+  });
+
+  it("keeps persisting the legacy score so snapshots written under the old model stay readable", async () => {
+    const store = new MemorySnapshotStore();
+    await store.putLatest(snapshotFor());
+
+    const stored = await store.getLatest(tenant);
+
+    expect(stored?.report.score).toBe(82);
   });
 });
 
@@ -612,6 +671,79 @@ describe("scan leases", () => {
     await expect(
       store.acquireScanLease({ authorizedAppId: "", merchantId: "m" }, "owner-1", 30_000),
     ).rejects.toBeInstanceOf(SnapshotStoreError);
+  });
+});
+
+/**
+ * Reading whether a scan is running is a separate, read-only operation from acquiring the
+ * lease. The dashboard uses it to disable a duplicate scan before the merchant submits;
+ * `POST /api/scans` still holds the authoritative `SET NX`, so this read can never be the
+ * thing that decides a race.
+ */
+describe("reading the active scan lease", () => {
+  it("reports an installation as scanning while its lease is held", async () => {
+    const store = new MemorySnapshotStore();
+
+    await expect(store.hasActiveScanLease(tenant)).resolves.toBe(false);
+    await store.acquireScanLease(tenant, "owner-1", 30_000);
+    await expect(store.hasActiveScanLease(tenant)).resolves.toBe(true);
+  });
+
+  it("stops reporting a scan once the lease is released", async () => {
+    const store = new MemorySnapshotStore();
+    const lease = await store.acquireScanLease(tenant, "owner-1", 30_000);
+
+    await store.releaseScanLease(lease!);
+
+    await expect(store.hasActiveScanLease(tenant)).resolves.toBe(false);
+  });
+
+  it("stops reporting a scan once the lease has expired", async () => {
+    let clock = 1_000;
+    const store = new MemorySnapshotStore(() => clock);
+    await store.acquireScanLease(tenant, "owner-1", 30_000);
+
+    clock += 30_001;
+
+    await expect(store.hasActiveScanLease(tenant)).resolves.toBe(false);
+  });
+
+  it("never reports one tenant's scan to another tenant", async () => {
+    const store = new MemorySnapshotStore();
+
+    await store.acquireScanLease(tenant, "owner-1", 30_000);
+
+    await expect(store.hasActiveScanLease(otherTenant)).resolves.toBe(false);
+  });
+
+  it("refuses a malformed tenant instead of reading a guessed key", async () => {
+    const store = new MemorySnapshotStore();
+
+    await expect(
+      store.hasActiveScanLease({ authorizedAppId: "", merchantId: "merchant-1" }),
+    ).rejects.toBeInstanceOf(SnapshotStoreError);
+    await expect(
+      store.hasActiveScanLease({ authorizedAppId: "app-1", merchantId: "bad merchant" }),
+    ).rejects.toBeInstanceOf(SnapshotStoreError);
+  });
+
+  it("reads the lease with a single Redis GET and never leaks the owner id", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse("owner-1"));
+
+    await expect(redisStore(fetchMock).hasActiveScanLease(tenant)).resolves.toBe(true);
+
+    const command = commandOf(fetchMock);
+    expect(command[0]).toBe("GET");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    // Raw tenant identifiers must not appear in the key space.
+    expect(String(command[1])).not.toContain("app-1");
+    expect(String(command[1])).not.toContain("merchant-1");
+  });
+
+  it("reads no lease as not scanning", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse(null));
+
+    await expect(redisStore(fetchMock).hasActiveScanLease(tenant)).resolves.toBe(false);
   });
 });
 

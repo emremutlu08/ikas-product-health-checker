@@ -5,6 +5,8 @@ import { collectProductHealthReport } from "@/lib/ikas/report-service";
 import type { HealthReport } from "@/lib/ikas/types";
 import {
   createSnapshotStore,
+  hasActiveScanLease,
+  SnapshotStoreError,
   type ScanSnapshot,
   type SnapshotStore,
 } from "./snapshot-store";
@@ -98,5 +100,51 @@ export async function runManualScan(
     return snapshot;
   } finally {
     await dependencies.snapshotStore.releaseScanLease(lease).catch(() => undefined);
+  }
+}
+
+export type ScanStatusDependencies = {
+  snapshotStore: Pick<SnapshotStore, "hasActiveScanLease">;
+};
+
+const defaultScanStatusDependencies: ScanStatusDependencies = {
+  // The module-level accessor, so this shares the configured store without constructing one
+  // per call and stays mockable at the same boundary the snapshot read uses.
+  snapshotStore: { hasActiveScanLease },
+};
+
+/**
+ * Whether a scan is currently running for this installation.
+ *
+ * This exists so a merchant who reloads the dashboard mid-scan still sees `Tarama sürüyor`,
+ * rather than a live button that only went quiet for the one render that followed a
+ * `?scan=busy` redirect. It is a Redis read and nothing else: no catalog call, no licence or
+ * entitlement lookup, and no token exchange, so putting it on the dashboard read path costs
+ * one key lookup.
+ *
+ * The tenant comes from the sealed server session the caller already resolved; no request
+ * input reaches this function, so no client value can select an installation.
+ *
+ * It is an affordance, not a guard. `POST /api/scans` still holds the authoritative
+ * `SET NX` lease, so a stale or unreadable answer here can only make the button look
+ * available — never let a duplicate scan through.
+ */
+export async function isScanRunning(
+  installation?: InstallationIdentity | null,
+  dependencies: ScanStatusDependencies = defaultScanStatusDependencies,
+): Promise<boolean> {
+  if (!installation) throw new IkasAuthenticationError("IKAS_LIVE_AUTH_REQUIRED");
+
+  try {
+    return await dependencies.snapshotStore.hasActiveScanLease({
+      authorizedAppId: installation.authorizedAppId,
+      merchantId: installation.merchantId,
+    });
+  } catch (error) {
+    // An unreachable lease store must not take down a dashboard that renders fine from an
+    // already-loaded snapshot. Unknown reads as "not running" because the server-side 409
+    // is what actually prevents the duplicate scan.
+    if (error instanceof SnapshotStoreError) return false;
+    throw error;
   }
 }

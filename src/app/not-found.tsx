@@ -2,15 +2,16 @@ import Link from "next/link";
 
 export default function NotFound() {
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-12 text-slate-950 sm:px-6">
-      <section className="mx-auto w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-700">Ürün Sağlığı</p>
-        <h1 className="mt-3 text-3xl font-bold tracking-tight">Sayfa bulunamadı</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
+    <main className="min-h-screen bg-canvas px-4 py-12 text-text sm:px-6">
+      <section className="mx-auto w-full max-w-2xl rounded-lg border border-border bg-surface p-6 shadow-card sm:p-10">
+        <p className="text-label font-semibold uppercase text-accent">Ürün Sağlığı</p>
+        <h1 className="mt-2 text-title font-semibold tracking-tight text-text">Sayfa bulunamadı</h1>
+        <p className="mt-3 text-sm leading-6 text-text-muted">
           Açmaya çalıştığınız adres artık kullanılmıyor veya hatalı olabilir.
         </p>
+        {/* Focus is drawn by the shared :focus-visible rule in globals.css. */}
         <Link
-          className="mt-7 inline-flex min-h-11 items-center justify-center rounded-xl bg-orange-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
+          className="mt-7 inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-5 py-3 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover"
           href="/"
         >
           Ürün Sağlığına dön

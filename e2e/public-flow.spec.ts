@@ -14,7 +14,10 @@ test("shows installation-required UI and opens the store authorization form", as
   await expect(page).toHaveURL(/\/authorize-store$/);
   await expect(page.getByRole("heading", { name: "Mağazanı bağla" })).toBeVisible();
   await expect(page.getByText("Yalnızca ürün ve stok bilgilerini okur.")).toBeVisible();
-  await expect(page.locator("main")).toHaveClass(/bg-slate-50/);
+  // The semantic canvas token, not a raw palette step. Asserted as a resolved colour rather
+  // than a class name so it survives a rename of the utility and still fails if the token stops
+  // resolving. --color-canvas is #f6f7f9.
+  await expect(page.locator("main")).toHaveCSS("background-color", "rgb(246, 247, 249)");
 });
 
 test("normalizes a full ikas admin URL to the store subdomain", async ({ page }) => {

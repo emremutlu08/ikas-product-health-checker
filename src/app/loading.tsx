@@ -1,23 +1,28 @@
+/**
+ * The fallback Next renders while a route resolves. A merchant sees it inside the same iframe
+ * as the dashboard, so it uses the same tokens, radius and type scale rather than a second
+ * visual system that makes every navigation look like a jump between two products.
+ */
 export default function Loading() {
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-12 text-slate-950 sm:px-6">
+    <main className="min-h-screen bg-canvas px-4 py-12 text-text sm:px-6">
       <section
         aria-live="polite"
-        className="mx-auto w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10"
+        className="mx-auto w-full max-w-3xl rounded-lg border border-border bg-surface p-6 shadow-card sm:p-10"
         role="status"
       >
-        <div aria-hidden="true" className="h-2 w-24 animate-pulse rounded-full bg-orange-500" />
-        <p className="mt-6 text-sm font-semibold uppercase tracking-[0.18em] text-orange-700">
-          Ürün Sağlığı
-        </p>
-        <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">Sayfa hazırlanıyor</h1>
-        <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600 sm:text-base">
+        <div aria-hidden="true" className="h-2 w-24 animate-pulse rounded-sm bg-accent" />
+        <p className="mt-6 text-label font-semibold uppercase text-accent">Ürün Sağlığı</p>
+        <h1 className="mt-2 text-title font-semibold tracking-tight text-text">
+          Sayfa hazırlanıyor
+        </h1>
+        <p className="mt-3 max-w-xl text-sm leading-6 text-text-muted">
           İstenen ekran güvenli biçimde yükleniyor. Bu işlem bağlantı hızına göre biraz sürebilir.
         </p>
         <div aria-hidden="true" className="mt-8 grid gap-3 sm:grid-cols-3">
-          <div className="h-20 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-20 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-20 animate-pulse rounded-2xl bg-slate-100" />
+          <div className="h-20 animate-pulse rounded-md bg-surface-sunken" />
+          <div className="h-20 animate-pulse rounded-md bg-surface-sunken" />
+          <div className="h-20 animate-pulse rounded-md bg-surface-sunken" />
         </div>
       </section>
     </main>

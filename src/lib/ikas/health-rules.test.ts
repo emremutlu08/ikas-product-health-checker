@@ -64,4 +64,40 @@ describe("issuesToCsv", () => {
     expect(csv).toContain("duplicate_sku");
     expect(csv).toContain("Silver Ring");
   });
+
+  it("neutralizes spreadsheet formulas in every upstream-controlled text cell", () => {
+    const csv = issuesToCsv([
+      {
+        ...report.issues[0],
+        productName: "=SUM(1,1)",
+        productId: "+cmd",
+        variantLabel: "-1+1",
+        variantId: "@IMPORTXML(https://evil.example)",
+        value: "  =HYPERLINK(https://evil.example)",
+        message: "\t=cmd",
+      },
+    ]);
+
+    expect(csv).toContain("'=SUM(1,1)");
+    expect(csv).toContain("'+cmd");
+    expect(csv).toContain("'-1+1");
+    expect(csv).toContain("'@IMPORTXML");
+    expect(csv).toContain("'  =HYPERLINK");
+    expect(csv).toContain("'\t=cmd");
+  });
+
+  it("neutralizes CR/LF-prefixed formulas before preserving CSV quotes and commas", () => {
+    const csv = issuesToCsv([
+      {
+        ...report.issues[0],
+        productName: "\r=CMD",
+        value: " \t-1+1",
+        message: "\n+CMD,\"argument\"",
+      },
+    ]);
+
+    expect(csv).toContain(`"'\r=CMD"`);
+    expect(csv).toContain("' \t-1+1");
+    expect(csv).toContain(`"'\n+CMD,""argument"""`);
+  });
 });

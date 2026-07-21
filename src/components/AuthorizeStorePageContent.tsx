@@ -22,7 +22,7 @@ export async function AuthorizeStorePageContent({
   const supportId = failed ? normalizeOAuthSupportId(params.errorId) : "";
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 text-slate-950 sm:px-6">
+    <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10 text-text sm:px-6">
       <IkasAppBridgeReady />
       <AuthorizeStoreForm failureReason={failureReason} initialStoreName={storeName} supportId={supportId} />
     </main>

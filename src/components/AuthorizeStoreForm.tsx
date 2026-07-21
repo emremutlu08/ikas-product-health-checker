@@ -48,19 +48,19 @@ export function AuthorizeStoreForm({ initialStoreName, failureReason, supportId 
   return (
     <form
       action="/api/oauth/authorize/ikas"
-      className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+      className="w-full max-w-xl rounded-lg border border-border bg-surface p-6 shadow-card sm:p-8"
       onSubmit={handleSubmit}
     >
-      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-700">Ürün Sağlığı</p>
-      <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">Mağazanı bağla</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
-        ikas mağaza adresinde <strong className="font-semibold text-slate-950">.myikas.com</strong> öncesinde bulunan kısmı gir.
+      <p className="text-label font-semibold uppercase text-accent">Ürün Sağlığı</p>
+      <h1 className="mt-2 text-title font-semibold tracking-tight text-text">Mağazanı bağla</h1>
+      <p className="mt-3 text-sm leading-6 text-text-muted">
+        ikas mağaza adresinde <strong className="font-semibold text-text">.myikas.com</strong> öncesinde bulunan kısmı gir.
       </p>
 
-      <label className="mt-6 block text-sm font-semibold text-slate-800" htmlFor="storeName">
+      <label className="mt-6 block text-sm font-semibold text-text" htmlFor="storeName">
         Mağaza adı
       </label>
-      <div className="mt-2 flex rounded-xl border border-slate-300 bg-white shadow-sm focus-within:border-orange-600 focus-within:ring-2 focus-within:ring-orange-600/20">
+      <div className="mt-2 flex rounded-md border border-border-strong bg-surface focus-within:border-accent">
         <input
           id="storeName"
           name="storeName"
@@ -72,20 +72,20 @@ export function AuthorizeStoreForm({ initialStoreName, failureReason, supportId 
           autoComplete="off"
           aria-describedby={describedBy}
           aria-invalid={storeNameInvalid || undefined}
-          className="min-w-0 flex-1 rounded-l-xl bg-transparent px-4 py-3 text-slate-950 outline-none placeholder:text-slate-400"
+          className="min-w-0 flex-1 rounded-l-md bg-transparent px-4 py-3 text-text outline-none placeholder:text-text-muted"
           placeholder="dev-emre2"
         />
-        <span aria-hidden="true" className="flex items-center rounded-r-xl border-l border-slate-200 bg-slate-50 px-3 text-sm text-slate-500">
+        <span aria-hidden="true" className="flex items-center rounded-r-md border-l border-border bg-surface-sunken px-3 text-sm text-text-muted">
           .myikas.com
         </span>
       </div>
-      <p className="mt-2 text-sm leading-6 text-slate-500" id="storeName-help">
+      <p className="mt-2 text-sm leading-6 text-text-muted" id="storeName-help">
         Tam adresi yapıştırırsan mağaza adını otomatik olarak ayıklarız.
       </p>
 
-      <section className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4" id="authorization-trust">
-        <h2 className="text-sm font-semibold text-slate-950">Güvenli ve salt okunur bağlantı</h2>
-        <ul className="mt-2 space-y-1 text-sm leading-6 text-slate-600">
+      <section className="mt-5 rounded-md border border-border bg-surface-sunken p-4" id="authorization-trust">
+        <h2 className="text-sm font-semibold text-text">Güvenli ve salt okunur bağlantı</h2>
+        <ul className="mt-2 space-y-1 text-sm leading-6 text-text-muted">
           <li>Yalnızca ürün ve stok bilgilerini okur.</li>
           <li>Ürün veya stok bilgileri değiştirilmez.</li>
           <li>Bağlantıdan sonra ilk sağlık raporun açılır.</li>
@@ -94,34 +94,32 @@ export function AuthorizeStoreForm({ initialStoreName, failureReason, supportId 
 
       {failureMessage ? (
         <div
-          className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-900"
+          className="mt-4 rounded-md border border-critical bg-critical-surface p-4 text-sm leading-6 text-critical"
           id="authorization-error"
           role="alert"
         >
-          <p className="font-semibold text-red-950">{failureMessage.title}</p>
+          <p className="font-semibold">{failureMessage.title}</p>
           <p className="mt-1">{failureMessage.detail}</p>
           <p className="mt-1">{failureMessage.action}</p>
           {supportId ? (
-            <div className="mt-3 rounded-xl border border-red-200 bg-white p-3">
+            <div className="mt-3 rounded-md border border-critical bg-surface p-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <p className="break-all text-xs text-red-950">
+                <p className="break-all text-xs text-critical">
                   Destek kodu:{" "}
-                  <code
-                    className="select-all font-mono focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
-                    tabIndex={0}
-                  >
+                  {/* The shared focus style in globals.css covers this; no per-element ring. */}
+                  <code className="select-all font-mono" tabIndex={0}>
                     {supportId}
                   </code>
                 </p>
                 <button
-                  className="shrink-0 rounded-lg border border-red-300 px-3 py-2 text-xs font-semibold text-red-900 transition hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
+                  className="shrink-0 rounded-md border border-critical px-3 py-2 text-xs font-semibold text-critical transition hover:bg-critical-surface"
                   onClick={copySupportCode}
                   type="button"
                 >
                   {copyStatus === "copied" ? "Kopyalandı" : "Kopyala"}
                 </button>
               </div>
-              <p aria-live="polite" className="mt-2 text-xs text-red-800">
+              <p aria-live="polite" className="mt-2 text-xs text-critical">
                 {copyStatus === "copied"
                   ? "Destek kodu kopyalandı."
                   : copyStatus === "failed"
@@ -134,12 +132,12 @@ export function AuthorizeStoreForm({ initialStoreName, failureReason, supportId 
       ) : null}
 
       <button
-        className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-orange-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
+        className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-accent px-5 py-3 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover"
         type="submit"
       >
         ikas ile güvenli şekilde bağlan
       </button>
-      <p className="mt-3 text-center text-xs leading-5 text-slate-500">
+      <p className="mt-3 text-center text-xs leading-5 text-text-muted">
         Yetkilendirmeyi ikas ekranında onaylayacaksın.
       </p>
     </form>
