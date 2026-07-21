@@ -4,6 +4,7 @@ import type { HealthIssue, HealthReport } from "@/lib/ikas/types";
 import {
   createSnapshotStore,
   isSnapshotStale,
+  MAX_HISTORY_ENTRIES,
   MAX_SNAPSHOT_BYTES,
   MAX_SNAPSHOT_PRODUCT_ROWS,
   MemorySnapshotStore,
@@ -196,30 +197,30 @@ async function expectRejectedOnPutAndGet(snapshot: ScanSnapshot) {
 
 describe("scan snapshot schema", () => {
   it("keeps a minimal tenant-bound record and never persists a token or raw catalog payload", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse("OK"));
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse(1));
 
     await redisStore(fetchMock).putLatest(snapshotFor());
 
     const command = commandOf(fetchMock);
-    expect(command[0]).toBe("SET");
-    const persisted = JSON.parse(String(command[2])) as ScanSnapshot;
+    expect(command[0]).toBe("EVAL");
+    const persisted = JSON.parse(String(command[7])) as ScanSnapshot;
     expect(persisted).toEqual(snapshotFor());
-    expect(String(command[2])).not.toContain("accessToken");
-    expect(String(command[2])).not.toContain("refreshToken");
-    expect(String(command[2])).not.toContain("variants");
+    expect(String(command[7])).not.toContain("accessToken");
+    expect(String(command[7])).not.toContain("refreshToken");
+    expect(String(command[7])).not.toContain("variants");
     // The raw tenant identifiers must not leak into the Redis key space.
-    expect(command[1]).not.toContain("app-1");
-    expect(command[1]).not.toContain("merchant-1");
+    expect(command[3]).not.toContain("app-1");
+    expect(command[3]).not.toContain("merchant-1");
   });
 
   it("drops fields that are not part of the snapshot contract", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse("OK"));
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse(1));
     const hostile = { ...snapshotFor(), accessToken: "secret-token", rawProducts: [{ id: "p" }] };
 
     await redisStore(fetchMock).putLatest(hostile as ScanSnapshot);
 
-    expect(String(commandOf(fetchMock)[2])).not.toContain("secret-token");
-    expect(String(commandOf(fetchMock)[2])).not.toContain("rawProducts");
+    expect(String(commandOf(fetchMock)[7])).not.toContain("secret-token");
+    expect(String(commandOf(fetchMock)[7])).not.toContain("rawProducts");
   });
 
   it("exposes safe snapshot metadata without tenant identifiers", () => {
@@ -292,13 +293,13 @@ describe("scan snapshot schema", () => {
 
 describe("tenant partitioning", () => {
   it("keys the latest snapshot by both installation and merchant", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse("OK"));
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse(1));
     const store = redisStore(fetchMock);
 
     await store.putLatest(snapshotFor());
     await store.putLatest(snapshotFor({ ...otherTenant, scanId: "scan-2" }));
 
-    expect(commandOf(fetchMock, 0)[1]).not.toBe(commandOf(fetchMock, 1)[1]);
+    expect(commandOf(fetchMock, 0)[3]).not.toBe(commandOf(fetchMock, 1)[3]);
   });
 
   it("never returns another tenant's snapshot from the in-memory store", async () => {
@@ -763,12 +764,122 @@ describe("snapshot freshness", () => {
   });
 });
 
-describe("history retention policy", () => {
-  it("denies history reads by default so Pro retention cannot leak before entitlement wiring", async () => {
-    const store = new MemorySnapshotStore();
-    await store.putLatest(snapshotFor());
+describe("bounded history retention", () => {
+  const historyEnabled = { historyEnabled: true } as const;
 
+  function historicalSnapshot(index: number, tenantOverride = tenant): ScanSnapshot {
+    const generatedAt = new Date(Date.UTC(2026, 6, 1, 0, index)).toISOString();
+    return snapshotFor({
+      scanId: `scan-${index}`,
+      ...tenantOverride,
+      generatedAt,
+      report: { ...report, generatedAt },
+    });
+  }
+
+  it("denies history reads and retains latest only by default", async () => {
+    const store = new MemorySnapshotStore();
+    await store.putLatest(historicalSnapshot(1));
+
+    await expect(store.getLatest(tenant)).resolves.toMatchObject({ scanId: "scan-1" });
     await expect(store.listHistory(tenant)).rejects.toMatchObject({ code: "history_disabled" });
+  });
+
+  it("returns explicitly retained history newest first", async () => {
+    const store = new MemorySnapshotStore();
+    await store.putLatest(historicalSnapshot(1), undefined, historyEnabled);
+    await store.putLatest(historicalSnapshot(2), undefined, historyEnabled);
+
+    await expect(store.listHistory(tenant, historyEnabled)).resolves.toMatchObject([
+      { scanId: "scan-2" },
+      { scanId: "scan-1" },
+    ]);
+  });
+
+  it("keeps exactly the newest bounded number of snapshots", async () => {
+    const store = new MemorySnapshotStore();
+    for (let index = 1; index <= MAX_HISTORY_ENTRIES + 2; index += 1) {
+      await store.putLatest(historicalSnapshot(index), undefined, historyEnabled);
+    }
+
+    const history = await store.listHistory(tenant, historyEnabled);
+    expect(history).toHaveLength(MAX_HISTORY_ENTRIES);
+    expect(history[0]?.scanId).toBe(`scan-${MAX_HISTORY_ENTRIES + 2}`);
+    expect(history.at(-1)?.scanId).toBe("scan-3");
+  });
+
+  it("never returns another tenant's retained snapshots", async () => {
+    const store = new MemorySnapshotStore();
+    await store.putLatest(historicalSnapshot(1), undefined, historyEnabled);
+    await store.putLatest(historicalSnapshot(2, otherTenant), undefined, historyEnabled);
+
+    await expect(store.listHistory(tenant, historyEnabled)).resolves.toMatchObject([
+      { scanId: "scan-1", authorizedAppId: tenant.authorizedAppId },
+    ]);
+    await expect(store.listHistory(otherTenant, historyEnabled)).resolves.toMatchObject([
+      { scanId: "scan-2", authorizedAppId: otherTenant.authorizedAppId },
+    ]);
+  });
+
+  it("atomically discards retained history when a latest-only scan is published", async () => {
+    const store = new MemorySnapshotStore();
+    await store.putLatest(historicalSnapshot(1), undefined, historyEnabled);
+    await store.putLatest(historicalSnapshot(2));
+
+    await expect(store.getLatest(tenant)).resolves.toMatchObject({ scanId: "scan-2" });
+    await expect(store.listHistory(tenant, historyEnabled)).resolves.toEqual([]);
+  });
+
+  it("publishes latest and retained history with one lease-guarded Redis script", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => redisResponse(1));
+    const store = redisStore(fetchMock);
+    const snapshot = historicalSnapshot(1);
+    const lease = { ...tenant, ownerId: "owner-1" };
+
+    await store.putLatest(snapshot, lease, historyEnabled);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const command = commandOf(fetchMock);
+    expect(command[0]).toBe("EVAL");
+    expect(command[2]).toBe(3);
+    expect(String(command[1])).toContain("LPUSH");
+    expect(String(command[1])).toContain("LTRIM");
+    expect(command).toContain("owner-1");
+    expect(command).toContain(String(MAX_HISTORY_ENTRIES));
+    const redisKeys = command.slice(3, 6).join(" ");
+    expect(redisKeys).not.toContain(tenant.authorizedAppId);
+    expect(redisKeys).not.toContain(tenant.merchantId);
+  });
+
+  it("reads and validates every Redis history record", async () => {
+    const snapshots = [historicalSnapshot(2), historicalSnapshot(1)];
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => redisResponse(snapshots.map((snapshot) => JSON.stringify(snapshot))));
+
+    await expect(redisStore(fetchMock).listHistory(tenant, historyEnabled)).resolves.toMatchObject([
+      { scanId: "scan-2" },
+      { scanId: "scan-1" },
+    ]);
+    expect(commandOf(fetchMock)[0]).toBe("LRANGE");
+  });
+
+  it("fails closed when any Redis history record is corrupt or cross-tenant", async () => {
+    const corruptFetch = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => redisResponse(["not-json"]));
+    const crossedFetch = vi.fn<typeof fetch>().mockImplementation(async () =>
+      redisResponse([JSON.stringify(historicalSnapshot(1, otherTenant))]),
+    );
+
+    await expect(redisStore(corruptFetch).listHistory(tenant, historyEnabled)).rejects.toMatchObject({
+      code: "corrupt_record",
+      operation: "history",
+    });
+    await expect(redisStore(crossedFetch).listHistory(tenant, historyEnabled)).rejects.toMatchObject({
+      code: "corrupt_record",
+      operation: "history",
+    });
   });
 });
 

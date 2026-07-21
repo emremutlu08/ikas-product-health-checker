@@ -93,11 +93,15 @@ function previousSnapshot(): ScanSnapshot {
   };
 }
 
-function createFixture(collectReport = vi.fn().mockResolvedValue(reportFor())) {
+function createFixture(
+  collectReport = vi.fn().mockResolvedValue(reportFor()),
+  resolveRetention = vi.fn().mockResolvedValue({ historyEnabled: false }),
+) {
   const snapshotStore = new MemorySnapshotStore();
   let scanCounter = 0;
   const dependencies: ManualScanDependencies = {
     collectReport,
+    resolveRetention,
     snapshotStore,
     now: () => new Date("2026-07-20T08:00:00.000Z"),
     createScanId: () => `scan-${++scanCounter}`,
@@ -128,6 +132,33 @@ describe("runManualScan", () => {
       report: reportFor(),
     });
     await expect(fixture.snapshotStore.getLatest(installation)).resolves.toEqual(snapshot);
+  });
+
+  it("publishes an explicit latest-only retention decision for Free scans", async () => {
+    const fixture = createFixture();
+    const putLatest = vi.spyOn(fixture.snapshotStore, "putLatest");
+
+    await runManualScan(installation, fixture.dependencies);
+
+    expect(fixture.dependencies.resolveRetention).toHaveBeenCalledWith(installation);
+    expect(putLatest).toHaveBeenCalledWith(
+      expect.objectContaining({ scanId: "scan-1" }),
+      expect.objectContaining({ authorizedAppId: installation.authorizedAppId }),
+      { historyEnabled: false },
+    );
+  });
+
+  it("retains a bounded history only when the server-side resolver grants it", async () => {
+    const fixture = createFixture(
+      vi.fn().mockResolvedValue(reportFor()),
+      vi.fn().mockResolvedValue({ historyEnabled: true }),
+    );
+
+    await runManualScan(installation, fixture.dependencies);
+
+    await expect(
+      fixture.snapshotStore.listHistory(installation, { historyEnabled: true }),
+    ).resolves.toMatchObject([{ scanId: "scan-1" }]);
   });
 
   it("binds the persisted snapshot to the server-side installation, not to the report body", async () => {

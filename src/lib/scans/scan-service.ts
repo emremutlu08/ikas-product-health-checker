@@ -1,3 +1,4 @@
+import { resolveInstallationRetentionPolicy } from "@/lib/billing/runtime-entitlement";
 import { IkasAuthenticationError } from "@/lib/ikas/errors";
 import type { InstallationIdentity } from "@/lib/ikas/installation-auth";
 import { PRODUCT_SCAN_MAX_DURATION_MS } from "@/lib/ikas/product-adapter";
@@ -8,6 +9,7 @@ import {
   hasActiveScanLease,
   SnapshotStoreError,
   type ScanSnapshot,
+  type SnapshotRetentionPolicy,
   type SnapshotStore,
 } from "./snapshot-store";
 
@@ -42,6 +44,7 @@ export class ScanBusyError extends Error {
 
 export type ManualScanDependencies = {
   collectReport(now: Date, installation: InstallationIdentity): Promise<HealthReport>;
+  resolveRetention(installation: InstallationIdentity): Promise<SnapshotRetentionPolicy>;
   snapshotStore: SnapshotStore;
   now(): Date;
   createScanId(): string;
@@ -55,6 +58,7 @@ function defaultDependencies(): ManualScanDependencies {
   configuredSnapshotStore ??= createSnapshotStore();
   return {
     collectReport: (now, installation) => collectProductHealthReport(now, installation),
+    resolveRetention: (installation) => resolveInstallationRetentionPolicy(installation),
     snapshotStore: configuredSnapshotStore,
     now: () => new Date(),
     createScanId: () => crypto.randomUUID(),
@@ -74,6 +78,11 @@ export async function runManualScan(
     authorizedAppId: installation.authorizedAppId,
     merchantId: installation.merchantId,
   };
+
+  // Licence IO happens before the scan lease so its timeout cannot consume the catalog/write
+  // budget. The resolver is fail-closed: anything except an active, tenant-bound Pro grant is
+  // latest-only, while the Free manual scan remains available.
+  const retention = await dependencies.resolveRetention(installation);
 
   const lease = await dependencies.snapshotStore.acquireScanLease(
     tenant,
@@ -96,7 +105,7 @@ export async function runManualScan(
 
     // Written only after a fully successful upstream read, and guarded by the lease so a
     // scan that lost its lease cannot overwrite a newer snapshot.
-    await dependencies.snapshotStore.putLatest(snapshot, lease);
+    await dependencies.snapshotStore.putLatest(snapshot, lease, retention);
     return snapshot;
   } finally {
     await dependencies.snapshotStore.releaseScanLease(lease).catch(() => undefined);
