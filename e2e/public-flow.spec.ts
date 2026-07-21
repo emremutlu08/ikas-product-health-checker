@@ -7,11 +7,14 @@ test("shows installation-required UI and opens the store authorization form", as
 
   expect(response?.status()).toBe(200);
   await expect(page.getByRole("heading", { name: "Kurulumu tamamla" })).toBeVisible();
-  await expect(page.getByText("yalnızca ürün ve stok bilgilerini okuma izni ister")).toBeVisible();
+  await expect(page.getByText("Ürün veya stok bilgileri değiştirilmez", { exact: false })).toBeVisible();
+  await expect(page.getByRole("link")).toHaveCount(1);
 
-  await page.getByRole("link", { name: "Mağaza adını elle gir" }).click();
+  await page.getByRole("link", { name: "ikas ile güvenli şekilde bağlan" }).click();
   await expect(page).toHaveURL(/\/authorize-store$/);
   await expect(page.getByRole("heading", { name: "Mağazanı bağla" })).toBeVisible();
+  await expect(page.getByText("Yalnızca ürün ve stok bilgilerini okur.")).toBeVisible();
+  await expect(page.locator("main")).toHaveClass(/bg-slate-50/);
 });
 
 test("normalizes a full ikas admin URL to the store subdomain", async ({ page }) => {
@@ -24,13 +27,35 @@ test("normalizes a full ikas admin URL to the store subdomain", async ({ page })
   await expect(input).toHaveValue("dev-emre2");
 });
 
-test("renders allowlisted OAuth failures and a validated support code", async ({ page }) => {
+test("renders allowlisted OAuth failures and copies a validated support code", async ({ context, page }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto(
     `/authorize-store?status=fail&reason=token_store_unavailable&errorId=${supportId}`,
   );
 
   await expect(page.getByText("Güvenli bağlantı deposu hazır değil.")).toBeVisible();
   await expect(page.getByText(`Destek kodu: ${supportId}`)).toBeVisible();
+  await page.getByRole("button", { name: "Kopyala" }).click();
+  await expect(page.getByRole("button", { name: "Kopyalandı" })).toBeVisible();
+  await expect(page.getByText("Destek kodu kopyalandı.")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(supportId);
+});
+
+test("shows a manual-copy fallback when clipboard access is denied", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: () => Promise.reject(new DOMException("Denied", "NotAllowedError")),
+      },
+    });
+  });
+  await page.goto(
+    `/authorize-store?status=fail&reason=token_store_unavailable&errorId=${supportId}`,
+  );
+
+  await page.getByRole("button", { name: "Kopyala" }).click();
+  await expect(page.getByText("Kod kopyalanamadı. Destek kodunu seçip elle kopyala.")).toBeVisible();
 });
 
 test("keeps report endpoints private without an installation session", async ({ request }) => {

@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ikas Ürün Sağlığı Asistanı",
-  description: "ikas ürün verilerini yalnızca okuma modunda kontrol eden sağlık raporu MVP’si.",
+  title: "Ürün Sağlığı | ikas",
+  description: "ikas ürün ve stok verilerini salt okunur olarak kontrol eden ürün sağlığı raporu.",
 };
 
 export default function RootLayout({
