@@ -1,7 +1,7 @@
 import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
 import { getProductHealthReport } from "@/lib/ikas/report-service";
 import { ProductImagePreview } from "@/components/ProductImagePreview";
-import { IkasAuthenticationError } from "@/lib/ikas/errors";
+import { IkasAuthenticationError, IkasUpstreamError } from "@/lib/ikas/errors";
 import type { MistakeRuleCode } from "@/lib/ikas/types";
 import { getIkasLaunchAuthenticationHref } from "@/lib/ikas/installation-auth";
 import { getSession, readInstallationSession } from "@/lib/session";
@@ -57,6 +57,12 @@ export default async function Home({
     if (error instanceof IkasAuthenticationError) {
       return <SetupRequiredScreen expired storeName={effectiveStoreName} />;
     }
+    if (
+      error instanceof IkasUpstreamError &&
+      error.code === "IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED"
+    ) {
+      return <ScanLimitScreen />;
+    }
     throw error;
   }
 
@@ -72,15 +78,15 @@ export default async function Home({
   const interestRecorded = params.interest === "recorded";
 
   return (
-    <main className="min-h-screen bg-[#f6f6f7] text-[#202223]">
+    <main className="min-h-screen bg-slate-50 text-slate-950">
       <IkasAppBridgeReady />
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-7 px-4 py-8 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-lg font-black text-emerald-300">P</div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-600 text-lg font-black text-white" aria-hidden="true">Ü</div>
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">ikas yönetim uygulaması ilk sürüm</p>
-              <h1 className="text-3xl font-bold tracking-tight text-slate-950">Ürün Sağlığı Asistanı</h1>
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-700">Canlı ürün denetimi</p>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-950">Ürün Sağlığı</h1>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -95,10 +101,7 @@ export default async function Home({
           <div>
             <h2 className="text-xl font-bold text-slate-700">Satışa mal olmadan ürün veri hatalarını bulun.</h2>
             <p className="mt-1 text-slate-600">SKU, barkod, fiyat, görsel, tekrarlanan başlık, tekrarlanan SKU ve stok kuralları yalnızca okuma modunda kontrol edilir.</p>
-            <a href="#low-stock-cta" className="mt-3 inline-flex text-sm font-bold text-blue-600">Stok uyarısı ilgimi çekti</a>
-          </div>
-          <div className="mt-4 flex text-5xl text-amber-300 md:mt-0" aria-hidden>
-            ☆☆☆☆☆
+            <a href="#low-stock-cta" className="mt-3 inline-flex text-sm font-bold text-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600">Stok uyarısı ilgimi çekti</a>
           </div>
         </section>
 
@@ -117,17 +120,21 @@ export default async function Home({
               <h2 className="text-2xl font-bold text-slate-950">Mağazanızı kontrol eden kurallar</h2>
               <p className="mt-1 text-sm text-slate-500">Etkilenen ürünleri filtrelemek için bir kurala tıklayın. Tüm kontroller yalnızca okuma modundadır.</p>
             </div>
-            <a className="rounded-xl bg-orange-500 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-600" href={baseDashboardHref}>
-              Filtreyi temizle
-            </a>
+            {selectedRuleLabel ? (
+              <a className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-bold text-slate-700 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600" href={baseDashboardHref}>
+                Filtreyi temizle
+              </a>
+            ) : null}
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <nav aria-label="Kural filtresi" className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {report.ruleSummaries.map((rule) => {
               const active = selectedRule === rule.code;
               return (
                 <a
                   key={rule.code}
+                  aria-current={active ? "page" : undefined}
+                  aria-label={`${rule.label}, ${rule.count} ürün`}
                   className={`relative flex min-h-20 items-center justify-center rounded-2xl px-5 py-4 text-center text-lg font-bold ring-1 transition ${
                     active
                       ? "border-orange-500 bg-orange-50 text-orange-700 ring-orange-400"
@@ -138,13 +145,14 @@ export default async function Home({
                   href={appendRuleToHref(baseDashboardHref, rule.code)}
                 >
                   {rule.label}
-                  <span className={`absolute -right-3 -top-3 flex h-10 min-w-10 items-center justify-center rounded-full px-2 text-sm font-black text-white ${rule.count === 0 ? "bg-emerald-600" : "bg-red-600"}`}>
+                  {active ? <span className="ml-2 text-xs font-semibold">Seçili</span> : null}
+                  <span aria-hidden="true" className={`absolute -right-2 -top-2 flex h-9 min-w-9 items-center justify-center rounded-full px-2 text-sm font-black text-white ${rule.count === 0 ? "bg-emerald-600" : "bg-red-600"}`}>
                     {rule.count}
                   </span>
                 </a>
               );
             })}
-          </div>
+          </nav>
         </section>
 
         <section className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -160,7 +168,7 @@ export default async function Home({
             </a>
           </div>
 
-          <div className="mt-6 overflow-hidden rounded-2xl ring-1 ring-slate-200">
+          <div className="mt-6 overflow-x-auto rounded-2xl ring-1 ring-slate-200" role="region" aria-label="Ürün sorunları tablosu" tabIndex={0}>
             <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
@@ -209,7 +217,7 @@ export default async function Home({
         <section id="low-stock-cta" className="rounded-3xl bg-slate-950 p-7 text-white shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-emerald-300">Ücretli MVP sinyali</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-orange-200">Pro ile sürekli izleme</p>
               <h2 className="mt-2 text-2xl font-bold">
                 {report.outOfStockBlockedCount} varyantta stok tükenmiş ve stok dışı satış kapalı
               </h2>
@@ -241,35 +249,49 @@ export default async function Home({
   );
 }
 
+function ScanLimitScreen() {
+  return (
+    <main className="min-h-screen bg-slate-50 px-4 py-12 text-slate-950 sm:px-6">
+      <section className="mx-auto w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-700">Ürün Sağlığı</p>
+        <h1 className="mt-3 text-3xl font-bold tracking-tight">Katalog bu taramanın güvenli sınırlarını aştı</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
+          Eksik veya kısmi bir rapor göstermiyoruz. Katalog büyüklüğü ya da tarama süresi belirlenen güvenli sınırı aştı.
+        </p>
+        <p className="mt-4 text-sm leading-6 text-slate-600">
+          Bu mağaza için tarama kapsamının destek ekibi tarafından incelenmesi gerekiyor.
+        </p>
+        <code className="mt-5 block select-all rounded-xl bg-slate-100 px-3 py-2 font-mono text-xs text-slate-700">
+          Hata kodu: IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED
+        </code>
+      </section>
+    </main>
+  );
+}
+
 function SetupRequiredScreen({ expired = false, storeName }: { expired?: boolean; storeName?: string }) {
   const setupHref = authorizeStoreHref(storeName);
 
   return (
-    <main className="min-h-screen bg-[#f6f6f7] text-[#202223]">
+    <main className="min-h-screen bg-slate-50 text-slate-950">
       <IkasAppBridgeReady />
       <section className="mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-10 sm:px-6">
         <div className="w-full rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">ikas Ürün Sağlığı</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-orange-700">Ürün Sağlığı</p>
           <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">
             {expired ? "Mağaza bağlantısını yenile" : "Kurulumu tamamla"}
           </h1>
           <p className="mt-3 text-base leading-7 text-slate-600">
-            Bu ekran canlı ikas yetkisi olmadan rapor göstermiyor. Devam etmek için mağazanı ikas yetkilendirmesiyle bağla; uygulama yalnızca ürün ve stok bilgilerini okuma izni ister.
+            Mağazanı bağlayarak SKU, barkod, fiyat, görsel ve stok sorunlarını tek raporda gör. Uygulama yalnızca ürün ve stok bilgilerini okur.
           </p>
           <div className="mt-5 rounded-2xl bg-blue-50 p-4 text-sm leading-6 text-blue-950 ring-1 ring-blue-100">
-            <p className="font-semibold">Mağaza adı formatı</p>
-            <p className="mt-1">
-              ikas admin adresin <strong>{"{storeName}.myikas.com/admin"}</strong> ise bağlantı ekranında yalnızca <strong>{"{storeName}"}</strong> yaz. Örneğin{" "}
-              <strong>foo.myikas.com/admin</strong> için <strong>foo</strong> girilir.
-            </p>
+            <p className="font-semibold">Güvenli ve salt okunur</p>
+            <p className="mt-1">Ürün veya stok bilgileri değiştirilmez. Yetkilendirmeyi ikas ekranında onaylarsın ve bağlantıdan sonra ilk sağlık raporun açılır.</p>
           </div>
           {storeName ? <p className="mt-4 text-sm text-slate-500">Algılanan mağaza adı: {storeName}</p> : null}
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <a className="rounded-xl bg-orange-500 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-600" href={setupHref}>
-              {expired ? "Bağlantıyı yenile" : "Kurulumu tamamla"}
-            </a>
-            <a className="rounded-xl bg-slate-100 px-5 py-3 text-center text-sm font-bold text-slate-700 transition hover:bg-slate-200" href="/authorize-store">
-              Mağaza adını elle gir
+          <div className="mt-6">
+            <a className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-orange-600 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 sm:w-auto" href={setupHref}>
+              {expired ? "Bağlantıyı güvenli şekilde yenile" : "ikas ile güvenli şekilde bağlan"}
             </a>
           </div>
         </div>

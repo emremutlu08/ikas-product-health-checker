@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HealthReport } from "@/lib/ikas/types";
+import { IkasUpstreamError } from "@/lib/ikas/errors";
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -123,6 +124,37 @@ describe("authenticated product health dashboard", () => {
     expect(html).toContain("Eksik SKU Ürünü");
     expect(html).not.toContain("Stoksuz Ürün");
     expect(html).toContain('href="/?rule=missing_sku"');
+    expect(html).toContain('aria-label="Kural filtresi"');
+    expect(html).toContain('aria-current="page"');
+    expect(html).toContain('aria-label="SKU Eksik, 1 ürün"');
+    expect(html).toContain("Filtreyi temizle");
+  });
+
+  it("does not render a clear-filter action when no rule is selected", async () => {
+    const html = await renderHome();
+
+    expect(html).not.toContain("Filtreyi temizle");
+  });
+
+  it("keeps the product action reachable in a horizontally scrollable table", async () => {
+    const html = await renderHome();
+
+    expect(html).toContain("overflow-x-auto");
+    expect(html).not.toContain("overflow-hidden rounded-2xl");
+  });
+
+  it("renders a truthful in-page state when the real report path exceeds scan limits", async () => {
+    mocks.getProductHealthReport.mockRejectedValue(
+      new IkasUpstreamError("IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED"),
+    );
+
+    const html = await renderHome();
+
+    expect(html).toContain("Katalog bu taramanın güvenli sınırlarını aştı");
+    expect(html).toContain("Eksik veya kısmi bir rapor göstermiyoruz");
+    expect(html).toContain("IKAS_UPSTREAM_SCAN_LIMIT_EXCEEDED");
+    expect(html).not.toContain("Geçici bir bağlantı");
+    expect(html).not.toContain("Yeniden dene");
   });
 
   it("submits paid-feature interest through a tenant-bound POST instead of a mailto link", async () => {
@@ -165,8 +197,23 @@ describe("authenticated product health dashboard", () => {
 
     const html = await renderHome();
 
-    expect(html).toContain("Kurulumu tamamla");
+    expect(html).toContain("ikas ile güvenli şekilde bağlan");
     expect(html).toContain('href="/authorize-store"');
+    expect(html.match(/href="\/authorize-store"/g)).toHaveLength(1);
+    expect(html).toContain("Ürün veya stok bilgileri değiştirilmez");
+    expect(html).toContain("bg-slate-50");
+    expect(html).not.toContain("bg-[#f6f6f7]");
+    expect(html).not.toContain("MVP");
+    expect(html).not.toContain("ilk sürüm");
     expect(mocks.getProductHealthReport).not.toHaveBeenCalled();
+  });
+
+  it("does not expose internal prototype language on the dashboard", async () => {
+    const html = await renderHome();
+
+    expect(html).not.toContain("MVP");
+    expect(html).not.toContain("ilk sürüm");
+    expect(html).not.toContain("Ücretli MVP sinyali");
+    expect(html).not.toContain("☆☆☆☆☆");
   });
 });
