@@ -71,23 +71,17 @@ function defaultDependencies(): ManualScanDependencies {
   };
 }
 
-export async function runManualScan(
-  installation?: InstallationIdentity | null,
-  dependencies: ManualScanDependencies = defaultDependencies(),
-): Promise<ScanSnapshot> {
-  // Tenant identity is whatever the caller resolved from the sealed server session.
-  // Nothing here reads request input, so no client value can select an installation.
-  if (!installation) throw new IkasAuthenticationError("IKAS_LIVE_AUTH_REQUIRED");
+export type ScheduledScanDependencies = Omit<ManualScanDependencies, "resolvePolicy">;
 
+async function executeScan(
+  installation: InstallationIdentity,
+  policy: ScanExecutionPolicy,
+  dependencies: ScheduledScanDependencies,
+): Promise<ScanSnapshot> {
   const tenant = {
     authorizedAppId: installation.authorizedAppId,
     merchantId: installation.merchantId,
   };
-
-  // Licence IO happens before the scan lease so its timeout cannot consume the catalog/write
-  // budget. The resolver is fail-closed: anything except an active, tenant-bound Pro grant is
-  // latest-only with threshold 0, while the Free manual scan remains available.
-  const policy = await dependencies.resolvePolicy(installation);
 
   const lease = await dependencies.snapshotStore.acquireScanLease(
     tenant,
@@ -99,7 +93,6 @@ export async function runManualScan(
   try {
     const now = dependencies.now();
     const report = await dependencies.collectReport(now, installation, policy.lowStockThreshold);
-
     const snapshot: ScanSnapshot = {
       version: 1,
       scanId: dependencies.createScanId(),
@@ -107,14 +100,35 @@ export async function runManualScan(
       generatedAt: now.toISOString(),
       report,
     };
-
-    // Written only after a fully successful upstream read, and guarded by the lease so a
-    // scan that lost its lease cannot overwrite a newer snapshot.
     await dependencies.snapshotStore.putLatest(snapshot, lease, policy.retention);
     return snapshot;
   } finally {
     await dependencies.snapshotStore.releaseScanLease(lease).catch(() => undefined);
   }
+}
+
+export async function runManualScan(
+  installation?: InstallationIdentity | null,
+  dependencies: ManualScanDependencies = defaultDependencies(),
+): Promise<ScanSnapshot> {
+  // Tenant identity is whatever the caller resolved from the sealed server session.
+  // Nothing here reads request input, so no client value can select an installation.
+  if (!installation) throw new IkasAuthenticationError("IKAS_LIVE_AUTH_REQUIRED");
+
+  // Licence IO happens before the scan lease so its timeout cannot consume the catalog/write
+  // budget. The resolver is fail-closed: anything except an active, tenant-bound Pro grant is
+  // latest-only with threshold 0, while the Free manual scan remains available.
+  const policy = await dependencies.resolvePolicy(installation);
+  return executeScan(installation, policy, dependencies);
+}
+
+/** Runs a scan from one already-authorized scheduler decision, avoiding a second entitlement read. */
+export async function runScheduledScan(
+  installation: InstallationIdentity,
+  policy: ScanExecutionPolicy,
+  dependencies: ScheduledScanDependencies = defaultDependencies(),
+): Promise<ScanSnapshot> {
+  return executeScan(installation, policy, dependencies);
 }
 
 export type ScanStatusDependencies = {

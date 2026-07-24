@@ -133,6 +133,9 @@ describe("secondary history and CSV access", () => {
 
     expect(html).toContain('href="/history"');
     expect(html).toContain("Geçmiş");
+    expect(html).toContain('href="/settings"');
+    expect(html).toContain("Ayarlar");
+    expect(html).toContain('aria-label="Ana navigasyon"');
   });
 
   it("offers CSV as a secondary action beside the primary scan", () => {

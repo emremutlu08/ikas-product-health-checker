@@ -6,6 +6,7 @@ import { MemorySnapshotStore, SnapshotStoreError, type ScanSnapshot } from "./sn
 import {
   isScanRunning,
   runManualScan,
+  runScheduledScan,
   SCAN_LEASE_TTL_MS,
   ScanBusyError,
   type ManualScanDependencies,
@@ -310,6 +311,25 @@ describe("runManualScan", () => {
     vi.spyOn(fixture.snapshotStore, "putLatest").mockRejectedValue(new Error("redis down"));
 
     await expect(runManualScan(installation, fixture.dependencies)).rejects.toThrow("redis down");
+  });
+});
+
+describe("runScheduledScan", () => {
+  it("uses the already-authorized Pro policy without resolving entitlement again", async () => {
+    const fixture = createFixture();
+
+    const snapshot = await runScheduledScan(
+      installation,
+      { retention: { historyEnabled: true }, lowStockThreshold: 7 },
+      fixture.dependencies,
+    );
+
+    expect(fixture.collectReport).toHaveBeenCalledWith(
+      new Date("2026-07-20T08:00:00.000Z"),
+      installation,
+      7,
+    );
+    expect(snapshot.report.score).toBe(82);
   });
 });
 

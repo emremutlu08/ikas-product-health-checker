@@ -55,7 +55,11 @@ function createFixture(
     status: "consumed",
     record: { storeName: "dev-emre2", createdAt: STATE_CREATED_AT },
   }));
+  const readToken = vi.fn(async () => undefined as StoredIkasToken | undefined);
   const persistToken = vi.fn(async (token: StoredIkasToken) => ({ ...token }));
+  const rollbackToken = vi.fn(async () => true);
+  const registerInstallation = vi.fn(async () => undefined);
+  const isInstallationRegistered = vi.fn(async () => false);
   const dependencies: OAuthCallbackDependencies = {
     getOAuthConfig: () => ({ clientId: "client-id", clientSecret: "client-secret" }),
     consumeOAuthState,
@@ -68,7 +72,11 @@ function createFixture(
           getAuthorizedApp: { id: "authorized-app-1" },
         },
       }),
+    readToken,
     persistToken,
+    rollbackToken,
+    registerInstallation,
+    isInstallationRegistered,
     createCorrelationId: () => ERROR_ID,
     now: () => NOW,
     logger: {
@@ -86,7 +94,19 @@ function createFixture(
     ...inputOverrides,
   };
 
-  return { consumeOAuthState, dependencies, events, exchangeToken, input, persistToken, session };
+  return {
+    consumeOAuthState,
+    dependencies,
+    events,
+    exchangeToken,
+    input,
+    readToken,
+    persistToken,
+    rollbackToken,
+    registerInstallation,
+    isInstallationRegistered,
+    session,
+  };
 }
 
 describe("processIkasOAuthCallback", () => {
@@ -362,6 +382,80 @@ describe("processIkasOAuthCallback", () => {
     expect(result).toMatchObject({ ok: false, reason: "token_persist_failed", storeName: "dev-emre2" });
     expect(fixture.session.save).toHaveBeenCalledOnce();
     expect(fixture.session.authorizedAppId).toBeUndefined();
+  });
+
+  it("reconciles an ambiguous registry ACK before reporting installation success", async () => {
+    const fixture = createFixture({
+      registerInstallation: vi.fn().mockRejectedValue(new Error("private registry detail")),
+      isInstallationRegistered: vi.fn().mockResolvedValue(true),
+    });
+
+    const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+
+    expect(result).toMatchObject({ ok: true, authorizedAppId: "authorized-app-1", storeName: "dev-emre2" });
+    expect(fixture.rollbackToken).not.toHaveBeenCalled();
+    expect(fixture.session.save).toHaveBeenCalledTimes(2);
+    expect(fixture.session.authorizedAppId).toBe("authorized-app-1");
+    expect(JSON.stringify(fixture.events)).not.toContain("private registry detail");
+  });
+
+  it("retries registry enrollment and rolls back when registration cannot be reconciled", async () => {
+    const registerInstallation = vi.fn().mockRejectedValue(new Error("private registry detail"));
+    const isInstallationRegistered = vi.fn().mockResolvedValue(false);
+    const fixture = createFixture({ registerInstallation, isInstallationRegistered });
+
+    const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+
+    expect(result).toMatchObject({ ok: false, reason: "registry_persist_failed" });
+    expect(registerInstallation).toHaveBeenCalledTimes(3);
+    expect(isInstallationRegistered).toHaveBeenCalledTimes(3);
+    expect(fixture.rollbackToken).toHaveBeenCalledOnce();
+    expect(fixture.session.authorizedAppId).toBeUndefined();
+    expect(JSON.stringify(fixture.events)).not.toContain("private registry detail");
+  });
+
+  it("rolls back the token and never activates the registry when installation session save fails", async () => {
+    const fixture = createFixture();
+    vi.mocked(fixture.session.save)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("private cookie backend detail"))
+      .mockResolvedValue(undefined);
+
+    const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+
+    expect(result).toMatchObject({ ok: false, reason: "session_save_failed" });
+    expect(fixture.registerInstallation).not.toHaveBeenCalled();
+    expect(fixture.rollbackToken).toHaveBeenCalledWith(
+      expect.objectContaining({ authorizedAppId: "authorized-app-1", merchantId: "merchant-1" }),
+      undefined,
+    );
+    expect(fixture.session.authorizedAppId).toBeUndefined();
+    expect(JSON.stringify(fixture.events)).not.toContain("private cookie backend detail");
+  });
+
+  it("restores the prior token with compare-and-set context when reauthorization fails", async () => {
+    const previous: StoredIkasToken = {
+      authorizedAppId: "authorized-app-1",
+      merchantId: "merchant-1",
+      storeName: "dev-emre2",
+      accessToken: "previous-access-token",
+      refreshToken: "previous-refresh-token",
+      expiresAt: NOW + 1_800_000,
+    };
+    const fixture = createFixture({ readToken: vi.fn().mockResolvedValue(previous) });
+    vi.mocked(fixture.session.save)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("private cookie backend detail"))
+      .mockResolvedValue(undefined);
+
+    const result = await processIkasOAuthCallback(fixture.input, fixture.dependencies);
+
+    expect(result).toMatchObject({ ok: false, reason: "session_save_failed" });
+    expect(fixture.rollbackToken).toHaveBeenCalledWith(
+      expect.objectContaining({ accessToken: "access-token" }),
+      previous,
+    );
+    expect(fixture.registerInstallation).not.toHaveBeenCalled();
   });
 
   it("returns an allowlisted persistence reason without establishing an installation session", async () => {

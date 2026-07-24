@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   readInstallationSession: vi.fn(),
   readMonitoringSettings: vi.fn(),
+  resolveVerifiedRecipient: vi.fn(),
+  isDailySummaryEmailConfigured: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({
@@ -17,6 +19,14 @@ vi.mock("@/lib/session", () => ({
 vi.mock("@/lib/settings/settings-service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/settings/settings-service")>()),
   readMonitoringSettings: mocks.readMonitoringSettings,
+}));
+
+vi.mock("@/lib/monitoring/verified-recipient", () => ({
+  resolveVerifiedRecipient: mocks.resolveVerifiedRecipient,
+}));
+
+vi.mock("@/lib/monitoring/email-summary", () => ({
+  isDailySummaryEmailConfigured: mocks.isDailySummaryEmailConfigured,
 }));
 
 vi.mock("@/components/IkasAppBridgeReady", () => ({ IkasAppBridgeReady: () => null }));
@@ -31,12 +41,15 @@ const installation = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("IKAS_MONITORING_SCHEDULER_ENABLED", "true");
   mocks.getSession.mockResolvedValue(installation);
   mocks.readInstallationSession.mockReturnValue(installation);
   mocks.readMonitoringSettings.mockResolvedValue({
     tier: "pro",
     settings: { lowStockThreshold: 12, dailyEmailEnabled: true },
   });
+  mocks.resolveVerifiedRecipient.mockReturnValue({ email: "owner@example.com" });
+  mocks.isDailySummaryEmailConfigured.mockReturnValue(true);
 });
 
 async function renderPage(searchParams?: Record<string, string>) {
@@ -91,6 +104,50 @@ describe("settings page", () => {
     // A label is associated with each control for keyboard and screen-reader users.
     expect(html).toContain('for="lowStockThreshold"');
     expect(html).toContain('for="dailyEmailEnabled"');
+    expect(html).toContain('aria-describedby="lowStockThreshold-help"');
+    expect(html).toContain('aria-describedby="dailyEmailEnabled-help"');
+    expect(html).toContain("Stok adedi 1 ile bu değer arasında olan aktif varyantlar");
+    expect(html).toContain("o***r@example.com");
+    expect(html).toContain("Otomatik tarama hazır");
+    expect(html).toContain("E-posta gönderimi hazır");
+  });
+
+  it("blocks email activation when the recipient or scheduler is not ready", async () => {
+    mocks.readMonitoringSettings.mockResolvedValue({
+      tier: "pro",
+      settings: { lowStockThreshold: 12, dailyEmailEnabled: false },
+    });
+    mocks.resolveVerifiedRecipient.mockReturnValue(undefined);
+    vi.stubEnv("IKAS_MONITORING_SCHEDULER_ENABLED", "false");
+
+    const html = await renderPage();
+
+    expect(html).toContain("Doğrulanmış e-posta alıcısı yapılandırılmamış");
+    expect(html).toContain("Otomatik tarama henüz etkin değil");
+    expect(html).toContain('disabled=""');
+  });
+
+  it("blocks email activation when provider delivery configuration is invalid", async () => {
+    mocks.readMonitoringSettings.mockResolvedValue({
+      tier: "pro",
+      settings: { lowStockThreshold: 12, dailyEmailEnabled: false },
+    });
+    mocks.isDailySummaryEmailConfigured.mockReturnValue(false);
+
+    const html = await renderPage();
+
+    expect(html).toContain("E-posta gönderimi henüz hazır değil");
+    expect(html).toContain('disabled=""');
+  });
+
+  it("keeps an existing email setting editable when delivery becomes temporarily unready", async () => {
+    mocks.isDailySummaryEmailConfigured.mockReturnValue(false);
+
+    const html = await renderPage();
+
+    expect(html).toContain("Mevcut e-posta ayarı açık kalır");
+    expect(html).toContain("checked");
+    expect(html).not.toContain('disabled=""');
   });
 
   it("does not pre-check the email box when the summary is disabled", async () => {
@@ -105,15 +162,21 @@ describe("settings page", () => {
     expect(html).not.toContain("checked");
   });
 
-  it("confirms a saved submission and flags a rejected one from the status param", async () => {
+  it("confirms saved, invalid, and unavailable submission states accessibly", async () => {
     expect(await renderPage({ status: "saved" })).toContain("kaydedildi");
     expect(await renderPage({ status: "invalid" })).toContain("kaydedilemedi");
+    const unavailable = await renderPage({ status: "unavailable" });
+    expect(unavailable).toContain('role="alert"');
+    expect(unavailable).toContain("etkinleştirilemedi");
   });
 
   it("links back to the dashboard and never renders sealed tenant identifiers", async () => {
     const html = await renderPage();
 
     expect(html).toContain('href="/"');
+    expect(html).toContain('href="/history"');
+    expect(html).toContain('href="/settings"');
+    expect(html).toContain('aria-label="Ana navigasyon"');
     expect(html).not.toContain(installation.authorizedAppId);
     expect(html).not.toContain(installation.merchantId);
     expect(mocks.readMonitoringSettings).toHaveBeenCalledWith(installation);

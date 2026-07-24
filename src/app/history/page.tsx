@@ -1,4 +1,5 @@
 import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
+import Link from "next/link";
 import {
   getProductHealthHistory,
   HistoryAccessError,
@@ -26,12 +27,12 @@ function StateScreen({ title, description }: { title: string; description: strin
       <section className="mx-auto max-w-2xl rounded-xl border border-border bg-surface p-6 shadow-card">
         <h1 className="text-title font-semibold">{title}</h1>
         <p className="mt-2 text-sm leading-6 text-text-muted">{description}</p>
-        <a
+        <Link
           className="mt-5 inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
           href="/"
         >
           Ürün Sağlığına dön
-        </a>
+        </Link>
       </section>
     </main>
   );
@@ -106,12 +107,11 @@ export default async function HistoryPage() {
             <h1 className="text-title font-semibold tracking-tight">Tarama Geçmişi</h1>
             <p className="mt-1 text-sm text-text-muted">Plan: Pro</p>
           </div>
-          <a
-            className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
-            href="/"
-          >
-            Ürün Sağlığına dön
-          </a>
+          <nav aria-label="Ana navigasyon" className="flex flex-wrap gap-2">
+            <Link className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/">Ürün Sağlığı</Link>
+            <Link aria-current="page" className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/history">Geçmiş</Link>
+            <Link className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/settings">Ayarlar</Link>
+          </nav>
         </header>
 
         {history.entries.length === 0 ? (

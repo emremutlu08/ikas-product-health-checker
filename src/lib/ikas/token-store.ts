@@ -939,8 +939,17 @@ export class IkasTokenService {
     await this.store.delete(authorizedAppId);
   }
 
+  async readStored(authorizedAppId: string) {
+    return this.store.get(authorizedAppId);
+  }
+
   async invalidateIfCurrent(token: StoredIkasToken) {
     return this.store.deleteIfMatches(token);
+  }
+
+  async restoreIfCurrent(current: StoredIkasToken, previous?: StoredIkasToken) {
+    if (!previous) return this.store.deleteIfMatches(current);
+    return this.store.compareAndSet(current, previous);
   }
 
   private async maintainTokenWithLease(authorizedAppId: string, lease: RefreshLease) {
@@ -1052,6 +1061,18 @@ export async function invalidateIkasToken(
   const service = createConfiguredTokenService();
   if (expectedToken) return service.invalidateIfCurrent(expectedToken);
   await service.invalidate(authorizedAppId);
+}
+
+export async function restoreIkasTokenIfCurrent(
+  current: StoredIkasToken,
+  previous?: StoredIkasToken,
+) {
+  return createConfiguredTokenService().restoreIfCurrent(current, previous);
+}
+
+export async function readStoredIkasToken(authorizedAppId?: string | null) {
+  if (!authorizedAppId) return undefined;
+  return createConfiguredTokenService().readStored(authorizedAppId);
 }
 
 export async function getIkasToken(authorizedAppId?: string | null) {

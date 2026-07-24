@@ -69,12 +69,20 @@ export function DashboardHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <a
-          className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
-          href="/history"
-        >
-          Geçmiş
-        </a>
+        <nav aria-label="Ana navigasyon" className="flex flex-wrap items-center gap-2">
+          <a
+            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
+            href="/history"
+          >
+            Geçmiş
+          </a>
+          <a
+            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
+            href="/settings"
+          >
+            Ayarlar
+          </a>
+        </nav>
         {csvHref ? (
           <a
             className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"

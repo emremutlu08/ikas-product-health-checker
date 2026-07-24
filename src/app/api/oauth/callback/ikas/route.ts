@@ -4,7 +4,15 @@ import { processIkasOAuthCallback } from "@/lib/ikas/oauth-callback";
 import type { OAuthFailureReason } from "@/lib/ikas/oauth-failure";
 import { consumeOAuthState } from "@/lib/ikas/oauth-state-store";
 import { isValidStoreName } from "@/lib/ikas/store-name";
-import { saveIkasToken } from "@/lib/ikas/token-store";
+import {
+  readStoredIkasToken,
+  restoreIkasTokenIfCurrent,
+  saveIkasToken,
+} from "@/lib/ikas/token-store";
+import {
+  isInstallationRegistered,
+  registerInstallation,
+} from "@/lib/registry/installation-registry-store";
 import { getSession } from "@/lib/session";
 import { OAuthAPI } from "@ikas/admin-api-client";
 import { type NextRequest, NextResponse } from "next/server";
@@ -77,7 +85,11 @@ export async function GET(request: NextRequest) {
           signal: AbortSignal.timeout(10_000),
         });
       },
+      readToken: readStoredIkasToken,
       persistToken: saveIkasToken,
+      rollbackToken: restoreIkasTokenIfCurrent,
+      registerInstallation,
+      isInstallationRegistered,
     },
   );
 

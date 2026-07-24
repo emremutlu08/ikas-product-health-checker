@@ -1,4 +1,5 @@
 import {
+  clearSessionData,
   consumeOAuthStateSession,
   saveInstallationSession,
   type SessionHandle,
@@ -24,6 +25,7 @@ export const OAUTH_CALLBACK_STAGES = [
   "app_context_query",
   "token_persist",
   "installation_session_save",
+  "installation_registry_register",
   "success_redirect",
 ] as const;
 
@@ -81,7 +83,24 @@ export type OAuthCallbackDependencies = {
     storeName: string;
   }): Promise<OAuthTokenResponse>;
   queryAppContext(accessToken: string): Promise<Response>;
+  readToken(authorizedAppId: string): Promise<StoredIkasToken | undefined>;
   persistToken(token: StoredIkasToken): Promise<unknown>;
+  rollbackToken(current: StoredIkasToken, previous?: StoredIkasToken): Promise<boolean>;
+  /**
+   * Records the installed tenant in the durable server registry. It receives only the validated
+   * installation identity — never a token — so the scheduler can later find this installation
+   * without the callback handing it any secret. A rejection fails the callback.
+   */
+  registerInstallation(installation: {
+    authorizedAppId: string;
+    merchantId: string;
+    storeName: string;
+  }): Promise<unknown>;
+  isInstallationRegistered(installation: {
+    authorizedAppId: string;
+    merchantId: string;
+    storeName: string;
+  }): Promise<boolean>;
   createCorrelationId?: () => string;
   now?: () => number;
   logger?: OAuthCallbackLogger;
@@ -116,6 +135,7 @@ const STAGE_DEFAULT_REASONS: Record<OAuthCallbackStage, OAuthFailureReason> = {
   token_exchange: "token_exchange_failed",
   app_context_query: "app_context_http_failed",
   token_persist: "token_persist_failed",
+  installation_registry_register: "registry_persist_failed",
   state_consume: "state_store_unavailable",
   installation_session_save: "session_save_failed",
   success_redirect: "unexpected_error",
@@ -242,6 +262,25 @@ function persistenceFailureReason(error: unknown): OAuthFailureReason {
     : "token_persist_failed";
 }
 
+async function ensureInstallationRegistered(
+  installation: { authorizedAppId: string; merchantId: string; storeName: string },
+  dependencies: OAuthCallbackDependencies,
+) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await dependencies.registerInstallation(installation);
+      return;
+    } catch {
+      try {
+        if (await dependencies.isInstallationRegistered(installation)) return;
+      } catch {
+        // The next idempotent registration attempt is also the reconciliation retry.
+      }
+    }
+  }
+  fail("registry_persist_failed");
+}
+
 export async function processIkasOAuthCallback(
   input: OAuthCallbackInput,
   dependencies: OAuthCallbackDependencies,
@@ -250,6 +289,9 @@ export async function processIkasOAuthCallback(
   const now = dependencies.now ?? Date.now;
   const logger = dependencies.logger ?? consoleLogger;
   let attemptedStoreName = "";
+  let pendingTokenRollback: { current: StoredIkasToken; previous?: StoredIkasToken } | undefined;
+  let installationSession: OAuthCallbackSession | undefined;
+  let installationSessionTouched = false;
 
   try {
     const oauthConfig = await runStage("oauth_config", correlationId, logger, () => {
@@ -344,9 +386,13 @@ export async function processIkasOAuthCallback(
       ...(token.tokenType ? { tokenType: token.tokenType } : {}),
       expiresAt: now() + token.expiresIn * 1000,
     };
+    installationSession = session;
+    const redirectUrl = new URL("/", input.successBaseUrl);
 
     await runStage("token_persist", correlationId, logger, async () => {
       try {
+        const previous = await dependencies.readToken(storedToken.authorizedAppId);
+        pendingTokenRollback = { current: storedToken, ...(previous ? { previous } : {}) };
         const persistedToken = await dependencies.persistToken(storedToken);
         if (!isVerifiedDurableToken(persistedToken, storedToken)) fail("token_persist_failed");
       } catch (error) {
@@ -355,17 +401,28 @@ export async function processIkasOAuthCallback(
       }
     });
 
-    await runStage("installation_session_save", correlationId, logger, () =>
-      saveInstallationSession(session, {
+    await runStage("installation_session_save", correlationId, logger, async () => {
+      installationSessionTouched = true;
+      await saveInstallationSession(session, {
         authorizedAppId: appContext.authorizedAppId,
         merchantId: appContext.merchantId,
         storeName,
-      }),
-    );
-
-    const redirectUrl = await runStage("success_redirect", correlationId, logger, () => {
-      return new URL("/", input.successBaseUrl);
+      });
     });
+
+    await runStage("installation_registry_register", correlationId, logger, () =>
+      ensureInstallationRegistered(
+        {
+          authorizedAppId: appContext.authorizedAppId,
+          merchantId: appContext.merchantId,
+          storeName,
+        },
+        dependencies,
+      ),
+    );
+    pendingTokenRollback = undefined;
+
+    await runStage("success_redirect", correlationId, logger, () => redirectUrl);
 
     return {
       ok: true,
@@ -375,6 +432,14 @@ export async function processIkasOAuthCallback(
       storeName,
     };
   } catch (error) {
+    if (pendingTokenRollback) {
+      await dependencies
+        .rollbackToken(pendingTokenRollback.current, pendingTokenRollback.previous)
+        .catch(() => false);
+      if (installationSessionTouched && installationSession) {
+        await clearSessionData(installationSession).catch(() => undefined);
+      }
+    }
     const reason = error instanceof OAuthCallbackFailure ? error.reason : "unexpected_error";
     return {
       ok: false,

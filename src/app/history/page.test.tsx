@@ -111,6 +111,8 @@ describe("history page", () => {
     expect(html).toContain('dateTime="2026-07-22T08:00:00.000Z"');
     expect(html).toContain('aria-label="Tarama geçmişi"');
     expect(html).toContain('aria-label="scan-2 tarama değişimleri"');
+    expect(html).toContain('aria-label="Ana navigasyon"');
+    expect(html).toContain('href="/settings"');
   });
 
   it("shows a fixed recoverable state for snapshot backend failures", async () => {

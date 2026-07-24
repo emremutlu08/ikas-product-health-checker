@@ -36,7 +36,8 @@ vi.mock("@/lib/scans/snapshot-store", async (importOriginal) => ({
   hasActiveScanLease: mocks.hasActiveScanLease,
 }));
 
-vi.mock("@/lib/billing/runtime-entitlement", () => ({
+vi.mock("@/lib/billing/runtime-entitlement", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/billing/runtime-entitlement")>()),
   resolveInstallationRetentionPolicy: mocks.resolveInstallationRetentionPolicy,
 }));
 

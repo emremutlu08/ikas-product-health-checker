@@ -1,5 +1,7 @@
 import { getCanonicalAppOrigin } from "@/helpers/api-helpers";
 import { IkasAuthenticationError } from "@/lib/ikas/errors";
+import { isDailySummaryEmailConfigured } from "@/lib/monitoring/email-summary";
+import { resolveVerifiedRecipient } from "@/lib/monitoring/verified-recipient";
 import {
   readMonitoringSettings,
   SettingsAccessError,
@@ -62,7 +64,10 @@ function readSettingsForm(form: FormData) {
   };
 }
 
-function settingsRedirect(canonicalOrigin: string, status: "saved" | "invalid") {
+function settingsRedirect(
+  canonicalOrigin: string,
+  status: "saved" | "invalid" | "unavailable" | "error",
+) {
   const location = new URL("/settings", canonicalOrigin);
   location.searchParams.set("status", status);
   return new Response(null, {
@@ -76,14 +81,18 @@ export async function POST(request: Request) {
   let canonicalOrigin: string | undefined;
 
   try {
-    // Tenant identity comes only from the sealed installation session. Body and query are never
-    // consulted to select an installation.
-    const installation = readInstallationSession(await getSession());
-    if (!installation) return jsonResponse({ error: "IKAS_LIVE_AUTH_REQUIRED" }, 401);
-
     canonicalOrigin = getCanonicalAppOrigin();
     if (request.headers.get("origin") !== canonicalOrigin) {
       return jsonResponse({ error: "IKAS_SETTINGS_ORIGIN_INVALID" }, 403);
+    }
+
+    // Tenant identity comes only from the sealed installation session. Body and query are never
+    // consulted to select an installation.
+    const installation = readInstallationSession(await getSession());
+    if (!installation) {
+      return prefersHtml(request)
+        ? settingsRedirect(canonicalOrigin, "error")
+        : jsonResponse({ error: "IKAS_LIVE_AUTH_REQUIRED" }, 401);
     }
 
     let form: FormData;
@@ -94,7 +103,26 @@ export async function POST(request: Request) {
     }
 
     // Only the two settings fields are read, so a tenant selector in the same body is ignored.
-    await updateMonitoringSettings(installation, readSettingsForm(form));
+    const settings = readSettingsForm(form);
+    const currentEmailEnabled = settings.dailyEmailEnabled
+      ? (await readMonitoringSettings(installation)).settings.dailyEmailEnabled
+      : false;
+    if (settings.dailyEmailEnabled && !currentEmailEnabled) {
+      let emailReady =
+        process.env.IKAS_MONITORING_SCHEDULER_ENABLED?.trim() === "true" &&
+        isDailySummaryEmailConfigured();
+      try {
+        emailReady = emailReady && Boolean(resolveVerifiedRecipient(installation));
+      } catch {
+        emailReady = false;
+      }
+      if (!emailReady) {
+        return prefersHtml(request)
+          ? settingsRedirect(canonicalOrigin, "unavailable")
+          : jsonResponse({ error: "IKAS_MONITORING_EMAIL_UNAVAILABLE" }, 409);
+      }
+    }
+    await updateMonitoringSettings(installation, settings);
 
     return prefersHtml(request)
       ? settingsRedirect(canonicalOrigin, "saved")
@@ -105,9 +133,12 @@ export async function POST(request: Request) {
       JSON.stringify({ event: "ikas_settings_write", correlationId, outcome: "failure", reason: code }),
     );
 
-    // A rejected value in a browser submit returns to the form with a status rather than raw JSON.
-    if (error instanceof SettingsValidationError && canonicalOrigin && prefersHtml(request)) {
-      return settingsRedirect(canonicalOrigin, "invalid");
+    // Browser form failures return to the settings UI instead of stranding the merchant on JSON.
+    if (canonicalOrigin && prefersHtml(request)) {
+      return settingsRedirect(
+        canonicalOrigin,
+        error instanceof SettingsValidationError ? "invalid" : "error",
+      );
     }
     return jsonResponse({ error: code }, status);
   }

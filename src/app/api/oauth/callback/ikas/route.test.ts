@@ -5,7 +5,11 @@ const mocks = vi.hoisted(() => ({
   consumeOAuthState: vi.fn(),
   getSession: vi.fn(),
   getTokenWithAuthorizationCode: vi.fn(),
+  readStoredIkasToken: vi.fn(),
+  restoreIkasTokenIfCurrent: vi.fn(),
   saveIkasToken: vi.fn(),
+  registerInstallation: vi.fn(),
+  isInstallationRegistered: vi.fn(),
 }));
 
 vi.mock("@/globals/config", () => ({
@@ -38,8 +42,18 @@ vi.mock("@/lib/ikas/oauth-state-store", async (importOriginal) => {
 
 vi.mock("@/lib/ikas/token-store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ikas/token-store")>();
-  return { ...actual, saveIkasToken: mocks.saveIkasToken };
+  return {
+    ...actual,
+    readStoredIkasToken: mocks.readStoredIkasToken,
+    restoreIkasTokenIfCurrent: mocks.restoreIkasTokenIfCurrent,
+    saveIkasToken: mocks.saveIkasToken,
+  };
 });
+
+vi.mock("@/lib/registry/installation-registry-store", () => ({
+  registerInstallation: mocks.registerInstallation,
+  isInstallationRegistered: mocks.isInstallationRegistered,
+}));
 
 import { GET } from "./route";
 
@@ -57,6 +71,8 @@ function createSession() {
 describe("GET /api/oauth/callback/ikas", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readStoredIkasToken.mockResolvedValue(undefined);
+    mocks.restoreIkasTokenIfCurrent.mockResolvedValue(true);
     mocks.consumeOAuthState.mockResolvedValue({
       status: "consumed",
       record: { storeName: "dev-emre2", createdAt: STATE_CREATED_AT },
@@ -72,6 +88,7 @@ describe("GET /api/oauth/callback/ikas", () => {
       },
     });
     mocks.saveIkasToken.mockImplementation(async (token) => ({ ...token }));
+    mocks.registerInstallation.mockResolvedValue(undefined);
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -115,6 +132,11 @@ describe("GET /api/oauth/callback/ikas", () => {
       { storeName: "dev-emre2" },
     );
     expect(mocks.consumeOAuthState).toHaveBeenCalledWith(OAUTH_STATE);
+    expect(mocks.registerInstallation).toHaveBeenCalledWith({
+      authorizedAppId: "authorized-app-1",
+      merchantId: "merchant-1",
+      storeName: "dev-emre2",
+    });
     expect(response.headers.get("location")).toBe("https://app.example.com/");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect({ ...session }).toEqual({
