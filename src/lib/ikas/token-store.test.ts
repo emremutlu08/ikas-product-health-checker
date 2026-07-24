@@ -881,6 +881,32 @@ describe("durable verification and configured memory behavior", () => {
     });
   });
 
+  it("reads rollback context without running refresh maintenance", async () => {
+    const store = new MemoryTokenStore();
+    const expired = { ...baseToken, expiresAt: NOW - 1 };
+    const refreshClient = vi.fn();
+    await store.set(expired);
+    const service = new IkasTokenService(store, { now: () => NOW, refreshClient });
+
+    await expect(service.readStored(expired.authorizedAppId)).resolves.toEqual(expired);
+    expect(refreshClient).not.toHaveBeenCalled();
+  });
+
+  it("restores a previous token only while the failed callback token is still current", async () => {
+    const store = new MemoryTokenStore();
+    const service = new IkasTokenService(store);
+    const replacement = { ...baseToken, accessToken: "replacement-access-token" };
+    const concurrent = { ...baseToken, accessToken: "concurrent-access-token" };
+    await store.set(replacement);
+
+    await expect(service.restoreIfCurrent(replacement, baseToken)).resolves.toBe(true);
+    await expect(store.get(baseToken.authorizedAppId)).resolves.toEqual(baseToken);
+
+    await store.set(concurrent);
+    await expect(service.restoreIfCurrent(replacement, baseToken)).resolves.toBe(false);
+    await expect(store.get(baseToken.authorizedAppId)).resolves.toEqual(concurrent);
+  });
+
   it("shares the explicitly non-production memory store across public save/get calls", async () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("IKAS_TOKEN_STORE_DRIVER", "memory");

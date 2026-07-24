@@ -58,8 +58,7 @@ The `.github/workflows/quality.yml` workflow runs `pnpm test:all`, lint, and the
 - Bulk fix
 - Storefront widget
 - Payment activation
-- Email alerts
-- Low Stock Alert automation
+- Real-time Low Stock Alert automation and merchant-triggered stock mutations
 - Product/stock/payment mutations
 
 
@@ -108,6 +107,12 @@ This file is gitignored and must never be committed.
 Production must use a managed Redis-compatible REST store. The preferred current environment names are `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`; both are server-only. Missing production storage configuration fails the OAuth install safely and never falls back to this file or to session-only auth.
 
 Production also requires `NEXT_PUBLIC_DEPLOY_URL` to be the exact canonical HTTPS origin, for example `https://health.example.com`. It must not contain a path, query, fragment, userinfo, backslash, or control character. Request `Host` and forwarded-host headers are never used to build OAuth callbacks. Plain HTTP is accepted only for explicit loopback origins outside production.
+
+Daily Pro monitoring is invoked hourly by Vercel at `/api/internal/monitoring/daily`. The scheduler checks at most 50 registered installations per invocation, scans at most 6 eligible installations with concurrency 3, and commits a 23-hour interval after a successful scan independently of optional email delivery. Users therefore receive a new history snapshot approximately once per day, not at a guaranteed local clock time. Missing/disabled email is counted separately and does not cause hourly catalogue rescans. A short owner-checked lease prevents overlap; busy and failed scans are released for a later retry. A durable opaque delivery ID survives retries caused by schedule-completion failure and is sent to Resend as the idempotency key, so an accepted email is not duplicated if schedule completion times out. Production requires server-only `CRON_SECRET` (at least 32 characters), `RESEND_API_KEY`, `IKAS_EMAIL_FROM`, and `IKAS_VERIFIED_EMAIL_RECIPIENTS_JSON`. Recipient records are exact `authorizedAppId + merchantId` matches and must carry `verified: true`; no client-supplied or unverified address is accepted.
+
+OAuth installation success requires durable token persistence, installation-session persistence, and confirmed scheduler registry enrollment. Registry registration is retried idempotently up to three times; after an ambiguous write failure, the callback reconciles by reading the tenant-bound registry record. If enrollment still cannot be confirmed, the callback fails closed and rolls back the token and installation session with compare-and-set safeguards, so an apparently successful installation cannot be silently omitted from scheduled monitoring.
+
+The scheduler is fail-closed by default. Set `IKAS_MONITORING_SCHEDULER_ENABLED=true` only after the production owner has accepted and verified the ikas uninstall/deactivation cleanup contract; without that exact value, authenticated cron requests return `503` before tenant processing. Do not infer or implement an uninstall webhook until ikas documents its signature, exact signed bytes, replay policy, retry behavior, event identifier, and payload schema.
 
 The report page, JSON endpoint, and CSV endpoint derive tenant identity only from the validated HttpOnly installation session. Query-string installation identifiers are not an authorization mechanism and are not included in dashboard, filter, CSV, or mail links.
 

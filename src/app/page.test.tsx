@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getLatestSnapshot: vi.fn(),
   hasActiveScanLease: vi.fn(),
   getIkasToken: vi.fn(),
+  resolveInstallationRetentionPolicy: vi.fn(),
   listProducts: vi.fn(),
 }));
 
@@ -33,6 +34,11 @@ vi.mock("@/lib/scans/snapshot-store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/scans/snapshot-store")>()),
   getLatestSnapshot: mocks.getLatestSnapshot,
   hasActiveScanLease: mocks.hasActiveScanLease,
+}));
+
+vi.mock("@/lib/billing/runtime-entitlement", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/billing/runtime-entitlement")>()),
+  resolveInstallationRetentionPolicy: mocks.resolveInstallationRetentionPolicy,
 }));
 
 vi.mock("@/lib/ikas/token-store", async (importOriginal) => ({
@@ -84,6 +90,7 @@ const report: HealthReport = {
     missing_brand: 0,
     missing_vendor: 0,
     zero_stock_blocked: 1,
+    low_stock: 0,
     missing_price: 0,
     duplicate_title: 0,
     weird_description: 0,
@@ -204,6 +211,7 @@ describe("dashboard reads the stored snapshot without scanning", () => {
     await renderHome({});
 
     expect(mocks.getLatestSnapshot).toHaveBeenCalledTimes(7);
+    expect(mocks.resolveInstallationRetentionPolicy).not.toHaveBeenCalled();
     expect(mocks.listProducts).not.toHaveBeenCalled();
   });
 

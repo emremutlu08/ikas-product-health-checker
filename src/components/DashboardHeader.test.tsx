@@ -127,7 +127,17 @@ describe("the primary scan action", () => {
   });
 });
 
-describe("secondary CSV access", () => {
+describe("secondary history and CSV access", () => {
+  it("links to the explicit history boundary without asserting a plan", () => {
+    const html = render(base);
+
+    expect(html).toContain('href="/history"');
+    expect(html).toContain("Geçmiş");
+    expect(html).toContain('href="/settings"');
+    expect(html).toContain("Ayarlar");
+    expect(html).toContain('aria-label="Ana navigasyon"');
+  });
+
   it("offers CSV as a secondary action beside the primary scan", () => {
     const html = render(base);
 

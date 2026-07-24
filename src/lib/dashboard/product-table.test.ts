@@ -49,6 +49,7 @@ function report(overrides: Partial<HealthReport>): HealthReport {
       missing_brand: 0,
       missing_vendor: 0,
       zero_stock_blocked: 0,
+      low_stock: 0,
       missing_price: 0,
       duplicate_title: 0,
       weird_description: 0,

@@ -27,6 +27,7 @@ const HEALTH_ISSUE_CODES = [
   "missing_brand",
   "missing_vendor",
   "zero_stock_blocked",
+  "low_stock",
   "missing_price",
   "duplicate_title",
   "weird_description",
@@ -62,16 +63,22 @@ export const MAX_SNAPSHOT_PRODUCT_ROWS = 10_000;
  */
 const MAX_SNAPSHOT_ISSUES = MAX_SNAPSHOT_PRODUCT_ROWS * 10;
 
+export const MAX_HISTORY_ENTRIES = 30;
 const TENANT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 const LEASE_OWNER_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_LEASE_TTL_MS = 5 * 60_000;
 const REDIS_KEY_PREFIX = "ikas:scan-snapshot:v1:";
+const REDIS_HISTORY_KEY_PREFIX = "ikas:scan-history:v1:";
 const REDIS_LEASE_KEY_PREFIX = "ikas:scan-lease:v1:";
 const REDIS_REQUEST_TIMEOUT_MS = 5_000;
 const RELEASE_LEASE_SCRIPT =
   "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
-const PUT_WITH_LEASE_SCRIPT =
-  "if redis.call('GET', KEYS[2]) ~= ARGV[1] then return -1 end; redis.call('SET', KEYS[1], ARGV[2]); return 1";
+const PUT_WITH_HISTORY_SCRIPT = [
+  "if ARGV[1] ~= '' and redis.call('GET', KEYS[2]) ~= ARGV[1] then return -1 end",
+  "redis.call('SET', KEYS[1], ARGV[2])",
+  "if ARGV[3] == '1' then redis.call('LPUSH', KEYS[3], ARGV[2]); redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1) else redis.call('DEL', KEYS[3]) end",
+  "return 1",
+].join("; ");
 
 const isoTimestamp = z
   .string()
@@ -114,11 +121,24 @@ const healthReportSchema = z.object({
   // A snapshot records a scan that finished. An in-flight scan has nothing to persist,
   // so a stored "queued" report could only be a partial or corrupted record.
   scanStatus: z.literal("success"),
-  issueCountsByCode: z.object(
-    Object.fromEntries(HEALTH_ISSUE_CODES.map((code) => [code, count])) as {
-      [K in (typeof HEALTH_ISSUE_CODES)[number]]: typeof count;
-    },
-  ),
+  issueCountsByCode: z.object({
+    missing_sku: count,
+    missing_barcode: count,
+    duplicate_sku: count,
+    duplicate_barcode: count,
+    missing_image: count,
+    missing_description: count,
+    missing_category: count,
+    missing_brand: count,
+    missing_vendor: count,
+    zero_stock_blocked: count,
+    // Explicit version-1 migration: records written before this rule existed could not contain
+    // a low_stock issue, so their only truthful value is zero. Every other field stays required.
+    low_stock: count.default(0),
+    missing_price: count,
+    duplicate_title: count,
+    weird_description: count,
+  }),
   criticalCount: count,
   warningCount: count,
   infoCount: count,
@@ -322,10 +342,27 @@ export type SnapshotRetentionPolicy = {
 
 export const DEFAULT_RETENTION_POLICY: SnapshotRetentionPolicy = { historyEnabled: false };
 
+function validateRetentionPolicy(
+  retention: SnapshotRetentionPolicy,
+  operation: "put" | "history",
+): SnapshotRetentionPolicy {
+  if (!isRecord(retention) || typeof retention.historyEnabled !== "boolean") {
+    throw new SnapshotStoreError("configuration", operation);
+  }
+  return { historyEnabled: retention.historyEnabled };
+}
+
 export interface SnapshotStore {
   getLatest(tenant: SnapshotTenant): Promise<ScanSnapshot | undefined>;
-  putLatest(snapshot: ScanSnapshot, lease?: ScanLease): Promise<void>;
-  listHistory(tenant: SnapshotTenant): Promise<ScanSnapshot[]>;
+  putLatest(
+    snapshot: ScanSnapshot,
+    lease?: ScanLease,
+    retention?: SnapshotRetentionPolicy,
+  ): Promise<void>;
+  listHistory(
+    tenant: SnapshotTenant,
+    retention?: SnapshotRetentionPolicy,
+  ): Promise<ScanSnapshot[]>;
   acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number): Promise<ScanLease | undefined>;
   releaseScanLease(lease: ScanLease): Promise<boolean>;
   /**
@@ -408,6 +445,10 @@ function latestKey(tenant: SnapshotTenant) {
   return `${REDIS_KEY_PREFIX}latest:${tenantDigest(tenant)}`;
 }
 
+function historyKey(tenant: SnapshotTenant) {
+  return `${REDIS_HISTORY_KEY_PREFIX}${tenantDigest(tenant)}`;
+}
+
 function leaseKey(tenant: SnapshotTenant) {
   return `${REDIS_LEASE_KEY_PREFIX}${tenantDigest(tenant)}`;
 }
@@ -434,24 +475,28 @@ function serializeSnapshotForWrite(snapshot: ScanSnapshot): {
   return { snapshot: parsed.data as ScanSnapshot, serialized };
 }
 
-function parseStoredSnapshot(raw: unknown, tenant: SnapshotTenant): ScanSnapshot {
-  if (typeof raw !== "string") throw new SnapshotStoreError("corrupt_record", "get");
+function parseStoredSnapshot(
+  raw: unknown,
+  tenant: SnapshotTenant,
+  operation: "get" | "history" = "get",
+): ScanSnapshot {
+  if (typeof raw !== "string") throw new SnapshotStoreError("corrupt_record", operation);
 
   // Measured before parsing: an oversized record is refused rather than expanded into
   // memory, whatever it happens to contain.
   if (Buffer.byteLength(raw, "utf8") > MAX_SNAPSHOT_BYTES) {
-    throw new SnapshotStoreError("payload_too_large", "get");
+    throw new SnapshotStoreError("payload_too_large", operation);
   }
 
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
-    throw new SnapshotStoreError("corrupt_record", "get");
+    throw new SnapshotStoreError("corrupt_record", operation);
   }
 
   const parsed = snapshotSchema.safeParse(value);
-  if (!parsed.success) throw new SnapshotStoreError("corrupt_record", "get");
+  if (!parsed.success) throw new SnapshotStoreError("corrupt_record", operation);
 
   // Defence in depth: the key already partitions tenants, but a record whose own
   // identity disagrees with the caller's is treated as corruption, never rendered.
@@ -459,7 +504,7 @@ function parseStoredSnapshot(raw: unknown, tenant: SnapshotTenant): ScanSnapshot
     parsed.data.authorizedAppId !== tenant.authorizedAppId ||
     parsed.data.merchantId !== tenant.merchantId
   ) {
-    throw new SnapshotStoreError("corrupt_record", "get");
+    throw new SnapshotStoreError("corrupt_record", operation);
   }
 
   return parsed.data as ScanSnapshot;
@@ -579,33 +624,42 @@ export class RedisRestSnapshotStore implements SnapshotStore {
     return parseStoredSnapshot(raw, validated);
   }
 
-  async putLatest(snapshot: ScanSnapshot, lease?: ScanLease) {
+  async putLatest(
+    snapshot: ScanSnapshot,
+    lease?: ScanLease,
+    retention: SnapshotRetentionPolicy = this.retention,
+  ) {
     const { snapshot: validated, serialized } = serializeSnapshotForWrite(snapshot);
     const tenant = { authorizedAppId: validated.authorizedAppId, merchantId: validated.merchantId };
+    const policy = validateRetentionPolicy(retention, "put");
+    let leaseOwner = "";
 
-    if (!lease) {
-      const result = await this.command(["SET", latestKey(tenant), serialized], "put");
-      if (result !== "OK") throw new SnapshotStoreError("backend", "put");
-      return;
+    if (lease) {
+      const validatedLease = validateLease(lease);
+      if (
+        validatedLease.authorizedAppId !== tenant.authorizedAppId ||
+        validatedLease.merchantId !== tenant.merchantId
+      ) {
+        throw new SnapshotStoreError("configuration", "put");
+      }
+      leaseOwner = validatedLease.ownerId;
     }
 
-    const validatedLease = validateLease(lease);
-    if (
-      validatedLease.authorizedAppId !== tenant.authorizedAppId ||
-      validatedLease.merchantId !== tenant.merchantId
-    ) {
-      throw new SnapshotStoreError("configuration", "put");
-    }
-
+    // One script owns latest publication, bounded history publication/erasure and the optional
+    // authoritative lease check. No reader can observe a latest snapshot whose history decision
+    // was only half applied.
     const result = await this.command(
       [
         "EVAL",
-        PUT_WITH_LEASE_SCRIPT,
-        2,
+        PUT_WITH_HISTORY_SCRIPT,
+        3,
         latestKey(tenant),
         leaseKey(tenant),
-        validatedLease.ownerId,
+        historyKey(tenant),
+        leaseOwner,
         serialized,
+        policy.historyEnabled ? "1" : "0",
+        String(MAX_HISTORY_ENTRIES),
       ],
       "put",
     );
@@ -613,10 +667,20 @@ export class RedisRestSnapshotStore implements SnapshotStore {
     if (result !== 1) throw new SnapshotStoreError("backend", "put");
   }
 
-  async listHistory(tenant: SnapshotTenant) {
-    validateTenant(tenant, "history");
-    if (!this.retention.historyEnabled) throw new SnapshotStoreError("history_disabled", "history");
-    return [];
+  async listHistory(
+    tenant: SnapshotTenant,
+    retention: SnapshotRetentionPolicy = this.retention,
+  ) {
+    const validated = validateTenant(tenant, "history");
+    const policy = validateRetentionPolicy(retention, "history");
+    if (!policy.historyEnabled) throw new SnapshotStoreError("history_disabled", "history");
+
+    const raw = await this.command(
+      ["LRANGE", historyKey(validated), 0, MAX_HISTORY_ENTRIES - 1],
+      "history",
+    );
+    if (!Array.isArray(raw)) throw new SnapshotStoreError("backend", "history");
+    return raw.map((record) => parseStoredSnapshot(record, validated, "history"));
   }
 
   async acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number) {
@@ -655,6 +719,7 @@ type LocalLease = ScanLease & { expiresAt: number };
 
 export class MemorySnapshotStore implements SnapshotStore {
   private readonly snapshots = new Map<string, string>();
+  private readonly histories = new Map<string, string[]>();
   private readonly leases = new Map<string, LocalLease>();
 
   constructor(
@@ -679,9 +744,14 @@ export class MemorySnapshotStore implements SnapshotStore {
     return parseStoredSnapshot(raw, validated);
   }
 
-  async putLatest(snapshot: ScanSnapshot, lease?: ScanLease) {
+  async putLatest(
+    snapshot: ScanSnapshot,
+    lease?: ScanLease,
+    retention: SnapshotRetentionPolicy = this.retention,
+  ) {
     const { snapshot: validated, serialized } = serializeSnapshotForWrite(snapshot);
     const tenant = { authorizedAppId: validated.authorizedAppId, merchantId: validated.merchantId };
+    const policy = validateRetentionPolicy(retention, "put");
 
     if (lease) {
       const validatedLease = validateLease(lease);
@@ -698,12 +768,24 @@ export class MemorySnapshotStore implements SnapshotStore {
     }
 
     this.snapshots.set(latestKey(tenant), serialized);
+    const key = historyKey(tenant);
+    if (policy.historyEnabled) {
+      this.histories.set(key, [serialized, ...(this.histories.get(key) ?? [])].slice(0, MAX_HISTORY_ENTRIES));
+    } else {
+      this.histories.delete(key);
+    }
   }
 
-  async listHistory(tenant: SnapshotTenant) {
-    validateTenant(tenant, "history");
-    if (!this.retention.historyEnabled) throw new SnapshotStoreError("history_disabled", "history");
-    return [];
+  async listHistory(
+    tenant: SnapshotTenant,
+    retention: SnapshotRetentionPolicy = this.retention,
+  ) {
+    const validated = validateTenant(tenant, "history");
+    const policy = validateRetentionPolicy(retention, "history");
+    if (!policy.historyEnabled) throw new SnapshotStoreError("history_disabled", "history");
+    return (this.histories.get(historyKey(validated)) ?? []).map((record) =>
+      parseStoredSnapshot(record, validated, "history"),
+    );
   }
 
   async acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number) {
@@ -782,8 +864,19 @@ export async function getLatestSnapshot(tenant: SnapshotTenant) {
   return snapshotStore().getLatest(tenant);
 }
 
-export async function saveLatestSnapshot(snapshot: ScanSnapshot, lease?: ScanLease) {
-  return snapshotStore().putLatest(snapshot, lease);
+export async function saveLatestSnapshot(
+  snapshot: ScanSnapshot,
+  lease?: ScanLease,
+  retention?: SnapshotRetentionPolicy,
+) {
+  return snapshotStore().putLatest(snapshot, lease, retention);
+}
+
+export async function listSnapshotHistory(
+  tenant: SnapshotTenant,
+  retention?: SnapshotRetentionPolicy,
+) {
+  return snapshotStore().listHistory(tenant, retention);
 }
 
 export async function acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number) {

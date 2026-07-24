@@ -62,10 +62,17 @@ async function requireTenantToken(
   return storedToken;
 }
 
+/** Options that shape the report a scan produces, resolved by the caller's server-side policy. */
+export type CollectProductHealthReportOptions = {
+  /** Active-Pro configured low-stock threshold. 0 (the default) disables low-stock warnings. */
+  lowStockThreshold?: number;
+};
+
 /** Live ikas catalog read. Only an explicit scan may call this. */
 export async function collectProductHealthReport(
   now = new Date(),
   installation?: InstallationIdentity | null,
+  options: CollectProductHealthReportOptions = {},
   dependencies: ProductHealthScanDependencies = defaultScanDependencies,
 ): Promise<HealthReport> {
   const storedToken = await requireTenantToken(installation, dependencies.getToken);
@@ -73,7 +80,10 @@ export async function collectProductHealthReport(
   const adapter = dependencies.createAdapter(config.graphApiUrl, storedToken.accessToken);
   try {
     const { products } = await adapter.listProducts();
-    return buildHealthReport(products, now, { merchantId: storedToken.merchantId });
+    return buildHealthReport(products, now, {
+      merchantId: storedToken.merchantId,
+      lowStockThreshold: options.lowStockThreshold,
+    });
   } catch (error) {
     if (error instanceof IkasAuthenticationError) {
       await dependencies.invalidateToken(installation!.authorizedAppId, storedToken);

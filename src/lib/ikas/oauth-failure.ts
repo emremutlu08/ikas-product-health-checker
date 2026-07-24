@@ -17,6 +17,7 @@ export const OAUTH_FAILURE_REASONS = [
   "authorized_app_missing",
   "token_store_unavailable",
   "token_persist_failed",
+  "registry_persist_failed",
   "session_save_failed",
   "unexpected_error",
 ] as const;
@@ -121,6 +122,11 @@ export const OAUTH_FAILURE_MESSAGES: Record<OAuthFailureReason, OAuthFailureMess
     title: "Mağaza bağlantısı güvenli biçimde kaydedilemedi.",
     detail: "Kalıcı kayıt ve doğrulama tamamlanmadığı için uygulama bağlı sayılmadı.",
     action: "Kısa süre sonra yeniden dene; sorun sürerse destek kodunu paylaş.",
+  },
+  registry_persist_failed: {
+    title: "Kurulum kalıcı olarak kaydedilemedi.",
+    detail: "Mağaza kurulum kaydı tamamlanamadığı için uygulama bağlı sayılmadı.",
+    action: "Kısa süre sonra yeniden dene; sorun sürerse destek kodunu uygulama ekibiyle paylaş.",
   },
   session_save_failed: {
     title: "Bağlantı oturumu doğrulanamadı.",

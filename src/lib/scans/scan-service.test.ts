@@ -6,6 +6,7 @@ import { MemorySnapshotStore, SnapshotStoreError, type ScanSnapshot } from "./sn
 import {
   isScanRunning,
   runManualScan,
+  runScheduledScan,
   SCAN_LEASE_TTL_MS,
   ScanBusyError,
   type ManualScanDependencies,
@@ -44,6 +45,7 @@ function reportFor(score = 82, generatedAt = "2026-07-20T08:00:00.000Z"): Health
       missing_brand: 0,
       missing_vendor: 0,
       zero_stock_blocked: 0,
+      low_stock: 0,
       missing_price: 0,
       duplicate_title: 0,
       weird_description: 0,
@@ -93,11 +95,15 @@ function previousSnapshot(): ScanSnapshot {
   };
 }
 
-function createFixture(collectReport = vi.fn().mockResolvedValue(reportFor())) {
+function createFixture(
+  collectReport = vi.fn().mockResolvedValue(reportFor()),
+  resolvePolicy = vi.fn().mockResolvedValue({ retention: { historyEnabled: false }, lowStockThreshold: 0 }),
+) {
   const snapshotStore = new MemorySnapshotStore();
   let scanCounter = 0;
   const dependencies: ManualScanDependencies = {
     collectReport,
+    resolvePolicy,
     snapshotStore,
     now: () => new Date("2026-07-20T08:00:00.000Z"),
     createScanId: () => `scan-${++scanCounter}`,
@@ -128,6 +134,68 @@ describe("runManualScan", () => {
       report: reportFor(),
     });
     await expect(fixture.snapshotStore.getLatest(installation)).resolves.toEqual(snapshot);
+  });
+
+  it("publishes an explicit latest-only retention decision for Free scans", async () => {
+    const fixture = createFixture();
+    const putLatest = vi.spyOn(fixture.snapshotStore, "putLatest");
+
+    await runManualScan(installation, fixture.dependencies);
+
+    expect(fixture.dependencies.resolvePolicy).toHaveBeenCalledWith(installation);
+    expect(putLatest).toHaveBeenCalledWith(
+      expect.objectContaining({ scanId: "scan-1" }),
+      expect.objectContaining({ authorizedAppId: installation.authorizedAppId }),
+      { historyEnabled: false },
+    );
+  });
+
+  it("retains a bounded history only when the server-side resolver grants it", async () => {
+    const fixture = createFixture(
+      vi.fn().mockResolvedValue(reportFor()),
+      vi.fn().mockResolvedValue({ retention: { historyEnabled: true }, lowStockThreshold: 0 }),
+    );
+
+    await runManualScan(installation, fixture.dependencies);
+
+    await expect(
+      fixture.snapshotStore.listHistory(installation, { historyEnabled: true }),
+    ).resolves.toMatchObject([{ scanId: "scan-1" }]);
+  });
+
+  it("passes the policy's low-stock threshold to the report source, resolved before the lease", async () => {
+    const order: string[] = [];
+    const collectReport = vi.fn().mockImplementation(async () => {
+      order.push("collect");
+      return reportFor();
+    });
+    const resolvePolicy = vi.fn().mockImplementation(async () => {
+      order.push("policy");
+      return { retention: { historyEnabled: true }, lowStockThreshold: 25 };
+    });
+    const fixture = createFixture(collectReport, resolvePolicy);
+
+    await runManualScan(installation, fixture.dependencies);
+
+    expect(collectReport).toHaveBeenCalledWith(expect.any(Date), installation, 25);
+    // The licence/settings decision resolves before the scan begins.
+    expect(order).toEqual(["policy", "collect"]);
+  });
+
+  it("scans latest-only with threshold 0 when the policy denies Pro, without blocking the scan", async () => {
+    const collectReport = vi.fn().mockResolvedValue(reportFor());
+    const fixture = createFixture(
+      collectReport,
+      vi.fn().mockResolvedValue({ retention: { historyEnabled: false }, lowStockThreshold: 0 }),
+    );
+
+    await expect(runManualScan(installation, fixture.dependencies)).resolves.toMatchObject({
+      scanId: "scan-1",
+    });
+    expect(collectReport).toHaveBeenCalledWith(expect.any(Date), installation, 0);
+    await expect(
+      fixture.snapshotStore.listHistory(installation, { historyEnabled: true }),
+    ).resolves.toEqual([]);
   });
 
   it("binds the persisted snapshot to the server-side installation, not to the report body", async () => {
@@ -243,6 +311,25 @@ describe("runManualScan", () => {
     vi.spyOn(fixture.snapshotStore, "putLatest").mockRejectedValue(new Error("redis down"));
 
     await expect(runManualScan(installation, fixture.dependencies)).rejects.toThrow("redis down");
+  });
+});
+
+describe("runScheduledScan", () => {
+  it("uses the already-authorized Pro policy without resolving entitlement again", async () => {
+    const fixture = createFixture();
+
+    const snapshot = await runScheduledScan(
+      installation,
+      { retention: { historyEnabled: true }, lowStockThreshold: 7 },
+      fixture.dependencies,
+    );
+
+    expect(fixture.collectReport).toHaveBeenCalledWith(
+      new Date("2026-07-20T08:00:00.000Z"),
+      installation,
+      7,
+    );
+    expect(snapshot.report.score).toBe(82);
   });
 });
 
