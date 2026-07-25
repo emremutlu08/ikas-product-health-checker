@@ -7,6 +7,9 @@ separates it from what is still unverified. No webhook route may be implemented 
 every item in the [Open questions](#open-questions--blockers) section has a written
 first-party answer.
 
+The internal, store-agnostic tenant cleanup foundation now exists. It is intentionally
+unwired: no webhook/API route or signature module calls it.
+
 ## Verified first-party facts
 
 These come directly from the supplied official ikas documentation.
@@ -70,3 +73,42 @@ signature verification or webhook handler is written.
 - Do not treat a `store/app/payment` event as granting entitlement. Entitlement must be
   resolved server-side from `getMerchantLicence`.
 - Do not count the existence of the `signature` field as verification.
+
+## Uninstall cleanup foundation
+
+`src/lib/lifecycle/tenant-cleanup-service.ts` accepts only the validated canonical tenant
+identity (`authorizedAppId` and `merchantId`). A future authenticated caller can invoke
+the service after the first-party signature, canonical-byte, secret-source, replay, and
+retry contracts are known.
+
+Cleanup is deterministic and best-effort in this order:
+
+1. durable, opaque deletion barrier
+2. installation registry
+3. token and refresh lease (the refresh fencing counter is retained)
+4. monitoring schedule state
+5. latest/history snapshots and scan lease
+6. monitoring settings
+7. paid-feature interest records
+
+The deletion barrier is written before any component cleanup. The write is an atomic
+compare-or-set: an existing marker is idempotent only when its opaque installation-and-merchant
+digest matches; a different merchant digest fails with `identity_mismatch` before any component
+is deleted. If that durable write fails, cleanup stops without deleting component state. Production
+Redis mutation scripts for registry, token/refresh lease, monitoring schedule, snapshots/scan lease,
+settings, and interest records check the same opaque barrier key inside the mutation's Lua
+transaction, so a stale worker cannot recreate tenant state after cleanup begins. The marker has no
+expiry and is never automatically cleared: reuse of an `authorizedAppId` on reinstall is unverified,
+so reopening it would not be fail-closed.
+
+Every store operation uses exact tenant-derived keys; none uses `SCAN`, a wildcard, or a
+new settings-key format. The service continues after component failures and returns only
+component names, sanitized status/error codes, and overall completeness. Retrying the
+whole cleanup is idempotent.
+
+Interest records are deleted rather than silently retained because they contain tenant
+identifiers, an operational feature-interest signal, and a timestamp. Their finite
+allowlisted intent keys make exact tenant-verified deletion possible without scanning.
+
+Verified recipients are runtime environment configuration, not tenant records. They are
+therefore explicitly outside uninstall cleanup and cannot be runtime-deleted.

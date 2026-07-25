@@ -98,7 +98,7 @@ Known non-blocking dev noise:
 - `/_next/webpack-hmr` WebSocket can fail over the Cloudflare tunnel in dev mode.
 - `cdn.myikas.com/images/<clientId>/null/image_360.webp` returns 404 until the Partner app has a real uploaded image/logo.
 
-Uninstall cleanup remains a follow-up until this repository contains a confirmed ikas uninstall event and signature contract. No speculative webhook should be deployed.
+The internal tenant-bound uninstall cleanup foundation now exists, including a durable non-expiring deletion barrier that production Redis mutations check atomically. Webhook wiring remains blocked until this repository contains a confirmed ikas uninstall event, signed-byte/secret contract, replay policy, retry contract, and reinstall identity semantics. No speculative webhook should be deployed.
 
 Current rule: live report is read-only. Do not add product, stock, price, or payment mutations to V1.
 
