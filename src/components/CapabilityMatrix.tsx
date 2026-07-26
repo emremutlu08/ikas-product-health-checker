@@ -57,8 +57,12 @@ export function CapabilityMatrix({ matrix }: CapabilityMatrixProps) {
         </p>
       </div>
 
-      {/* Wide content scrolls inside its own container so the page never scrolls sideways. */}
-      <div className="overflow-x-auto rounded-lg border border-border bg-surface">
+      {/*
+        Wide content scrolls inside its own container so the page never scrolls sideways.
+        `min-w-0` is load-bearing: as a flex child this element defaults to `min-width: auto`,
+        which lets the wide table push the whole page instead of scrolling within itself.
+      */}
+      <div className="min-w-0 overflow-x-auto rounded-lg border border-border bg-surface">
         <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
           <caption className="sr-only">
             Uygulama yeteneklerinin Free ve PRO paketlerine göre karşılaştırması ve güncel yayın

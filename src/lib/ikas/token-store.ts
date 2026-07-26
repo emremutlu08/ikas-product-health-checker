@@ -969,14 +969,25 @@ function resolveRedisCredentials(env: Environment) {
   return readCredentialPair(env, TOKEN_STORE_ENV_KEYS.legacyVercelKv);
 }
 
+export const TOKEN_STORE_FILE_ENV_KEY = "IKAS_TOKEN_STORE_FILE";
+
 export function createTokenStore({
   env = process.env,
   fetchImpl = fetch,
-  filePath = path.join(process.cwd(), ".ikas-runtime-tokens.json"),
+  filePath,
   fileSystem = fs,
 }: TokenStoreFactoryOptions = {}): TokenStore {
   const environment = environmentValue(env, "NODE_ENV");
   const driver = environmentValue(env, "IKAS_TOKEN_STORE_DRIVER");
+  /**
+   * The file driver already refuses to run in production, so an overridable path only ever moves
+   * a development or browser-test store off the working copy — which is what keeps an end-to-end
+   * run from writing over a developer's own local tokens.
+   */
+  const resolvedFilePath =
+    filePath ??
+    environmentValue(env, TOKEN_STORE_FILE_ENV_KEY) ??
+    path.join(process.cwd(), ".ikas-runtime-tokens.json");
   if (driver && !["redis", "file", "memory"].includes(driver)) {
     throw new TokenStoreError("configuration", "configure");
   }
@@ -987,7 +998,9 @@ export function createTokenStore({
     if (environment !== "development" && environment !== "test") {
       throw new TokenStoreError("configuration", "configure");
     }
-    return driver === "file" ? new FileTokenStore({ filePath, fileSystem }) : new MemoryTokenStore();
+    return driver === "file"
+      ? new FileTokenStore({ filePath: resolvedFilePath, fileSystem })
+      : new MemoryTokenStore();
   }
 
   if (redisCredentials) {
@@ -999,7 +1012,9 @@ export function createTokenStore({
   }
 
   if (environment === "test") return new MemoryTokenStore();
-  if (environment === "development") return new FileTokenStore({ filePath, fileSystem });
+  if (environment === "development") {
+    return new FileTokenStore({ filePath: resolvedFilePath, fileSystem });
+  }
 
   throw new TokenStoreError("configuration", "configure");
 }

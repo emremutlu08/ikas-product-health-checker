@@ -83,6 +83,12 @@ export function DashboardHeader({
           </a>
           <a
             className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
+            href="/corrections"
+          >
+            Düzeltmeler
+          </a>
+          <a
+            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
             href="/plan"
           >
             Plan
