@@ -1,3 +1,5 @@
+import { APP_FULL_NAME } from "@/globals/branding";
+
 /**
  * The fallback Next renders while a route resolves. A merchant sees it inside the same iframe
  * as the dashboard, so it uses the same tokens, radius and type scale rather than a second
@@ -12,7 +14,7 @@ export default function Loading() {
         role="status"
       >
         <div aria-hidden="true" className="h-2 w-24 animate-pulse rounded-sm bg-accent" />
-        <p className="mt-6 text-label font-semibold uppercase text-accent">Ürün Sağlığı</p>
+        <p className="mt-6 text-label font-semibold uppercase text-accent">{APP_FULL_NAME}</p>
         <h1 className="mt-2 text-title font-semibold tracking-tight text-text">
           Sayfa hazırlanıyor
         </h1>

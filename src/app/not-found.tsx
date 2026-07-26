@@ -1,10 +1,11 @@
 import Link from "next/link";
+import { APP_FULL_NAME } from "@/globals/branding";
 
 export default function NotFound() {
   return (
     <main className="min-h-screen bg-canvas px-4 py-12 text-text sm:px-6">
       <section className="mx-auto w-full max-w-2xl rounded-lg border border-border bg-surface p-6 shadow-card sm:p-10">
-        <p className="text-label font-semibold uppercase text-accent">Ürün Sağlığı</p>
+        <p className="text-label font-semibold uppercase text-accent">{APP_FULL_NAME}</p>
         <h1 className="mt-2 text-title font-semibold tracking-tight text-text">Sayfa bulunamadı</h1>
         <p className="mt-3 text-sm leading-6 text-text-muted">
           Açmaya çalıştığınız adres artık kullanılmıyor veya hatalı olabilir.

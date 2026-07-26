@@ -1,8 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import ErrorBoundary from "./error";
 import Loading from "./loading";
 import NotFound from "./not-found";
+import { metadata } from "./layout";
+import { APP_BRAND, APP_FULL_NAME, APP_NAME, APP_SECTION_NAME } from "@/globals/branding";
 
 /**
  * The surfaces Next renders on its own — the loading fallback and the 404 — are as
@@ -48,5 +51,33 @@ describe("the not-found page keeps its way back", () => {
 
     expect(html).toContain('href="/"');
     expect(html).toContain("Sayfa bulunamadı");
+  });
+});
+
+/**
+ * The name a merchant arrives to.
+ *
+ * These assertions pin the whole brand string rather than a substring, because the previous
+ * spelling was a substring of the new one — every existing test kept passing through a rename that
+ * changed what the product is called. A rename should have to update this file on purpose.
+ */
+describe("app identity", () => {
+  it("names the app in full on every surface a merchant can arrive at cold", () => {
+    for (const { render } of surfaces) {
+      expect(render()).toContain(APP_FULL_NAME);
+    }
+    expect(renderToStaticMarkup(<ErrorBoundary error={new Error("x")} reset={() => {}} unstable_retry={() => {}} />))
+      .toContain(APP_FULL_NAME);
+  });
+
+  it("uses the full name for the browser tab", () => {
+    expect(metadata.title).toBe(APP_FULL_NAME);
+  });
+
+  it("keeps navigation on the short section name, which reads as a destination", () => {
+    expect(APP_SECTION_NAME).toBe("Ürün Sağlığı");
+    expect(APP_FULL_NAME.startsWith(`${APP_BRAND} | `)).toBe(true);
+    // The brand belongs in front of the app name, not inside it.
+    expect(APP_NAME).not.toContain(APP_BRAND);
   });
 });

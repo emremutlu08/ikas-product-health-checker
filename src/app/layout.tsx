@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { APP_FULL_NAME } from "@/globals/branding";
 
 export const metadata: Metadata = {
-  title: "Ürün Sağlığı | ikas",
+  title: APP_FULL_NAME,
   description: "ikas ürün ve stok verilerini salt okunur olarak kontrol eden ürün sağlığı raporu.",
 };
 

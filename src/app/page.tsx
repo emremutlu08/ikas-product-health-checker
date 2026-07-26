@@ -17,6 +17,7 @@ import type { HealthReport, MistakeRuleCode } from "@/lib/ikas/types";
 import { getIkasLaunchAuthenticationHref } from "@/lib/ikas/installation-auth";
 import { getSession, readInstallationSession } from "@/lib/session";
 import { redirect } from "next/navigation";
+import { APP_FULL_NAME } from "@/globals/branding";
 
 export const dynamic = "force-dynamic";
 
@@ -233,7 +234,7 @@ function FirstScanScreen({
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-10 sm:px-6">
         <ScanOutcomeNotice hasSnapshot={false} outcome={scanOutcome} />
         <section className="w-full rounded-lg border border-border bg-surface p-6 shadow-card">
-          <p className="text-label font-semibold uppercase text-accent">Ürün Sağlığı</p>
+          <p className="text-label font-semibold uppercase text-accent">{APP_FULL_NAME}</p>
           <h1 className="mt-2 text-title font-semibold tracking-tight text-text">
             Henüz tarama yapılmadı
           </h1>
@@ -267,7 +268,7 @@ function SetupRequiredScreen({ expired = false, storeName }: { expired?: boolean
       <IkasAppBridgeReady />
       <div className="mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-10 sm:px-6">
         <section className="w-full rounded-lg border border-border bg-surface p-6 shadow-card">
-          <p className="text-label font-semibold uppercase text-accent">Ürün Sağlığı</p>
+          <p className="text-label font-semibold uppercase text-accent">{APP_FULL_NAME}</p>
           <h1 className="mt-2 text-title font-semibold tracking-tight text-text">
             {expired ? "Mağaza bağlantısını yenile" : "Kurulumu tamamla"}
           </h1>
