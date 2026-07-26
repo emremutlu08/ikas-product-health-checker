@@ -5,7 +5,7 @@ import ErrorBoundary from "./error";
 import Loading from "./loading";
 import NotFound from "./not-found";
 import { metadata } from "./layout";
-import { APP_BRAND, APP_FULL_NAME, APP_NAME, APP_SECTION_NAME } from "@/globals/branding";
+import { APP_FULL_NAME, APP_NAME, APP_SECTION_NAME } from "@/globals/branding";
 
 /**
  * The surfaces Next renders on its own — the loading fallback and the 404 — are as
@@ -75,9 +75,9 @@ describe("app identity", () => {
   });
 
   it("keeps navigation on the short section name, which reads as a destination", () => {
+    expect(APP_FULL_NAME).toBe("Ürün Sağlığı Asistanı");
+    // The section name is the destination, so it has to be a prefix a merchant recognises.
     expect(APP_SECTION_NAME).toBe("Ürün Sağlığı");
-    expect(APP_FULL_NAME.startsWith(`${APP_BRAND} | `)).toBe(true);
-    // The brand belongs in front of the app name, not inside it.
-    expect(APP_NAME).not.toContain(APP_BRAND);
+    expect(APP_NAME.startsWith(APP_SECTION_NAME)).toBe(true);
   });
 });
