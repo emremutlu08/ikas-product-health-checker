@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
 import { TOKEN_STORE_ENV_KEYS } from "@/lib/ikas/token-store";
+import {
+  TENANT_DELETED_REDIS_RESULT,
+  TenantIdentityError,
+  tenantDeletionKey,
+  validateTenantIdentity,
+  type DeleteResult,
+  type TenantIdentity,
+} from "@/lib/lifecycle/tenant-identity";
 
 /**
  * Paid-feature demand signals. Records are deliberately minimal: they answer "which
@@ -10,9 +18,7 @@ export const INTEREST_INTENTS = ["low_stock_threshold_monitoring"] as const;
 
 export type InterestIntent = (typeof INTEREST_INTENTS)[number];
 
-export type InterestRecord = {
-  authorizedAppId: string;
-  merchantId: string;
+export type InterestRecord = TenantIdentity & {
   intent: InterestIntent;
   createdAt: number;
 };
@@ -21,10 +27,16 @@ export type InterestRecordResult = "recorded" | "already_recorded";
 
 export interface InterestStore {
   record(record: InterestRecord): Promise<InterestRecordResult>;
+  deleteTenant(tenant: TenantIdentity): Promise<DeleteResult>;
 }
 
-export type InterestStoreErrorCode = "configuration" | "backend";
-export type InterestStoreOperation = "configure" | "record";
+export type InterestStoreErrorCode =
+  | "configuration"
+  | "backend"
+  | "corrupt_record"
+  | "tenant_mismatch"
+  | "tenant_deleted";
+export type InterestStoreOperation = "configure" | "record" | "delete_tenant";
 
 export class InterestStoreError extends Error {
   readonly code: InterestStoreErrorCode;
@@ -41,6 +53,23 @@ export class InterestStoreError extends Error {
 const REDIS_KEY_PREFIX = "ikas:interest:v1:";
 const REDIS_REQUEST_TIMEOUT_MS = 5_000;
 const TENANT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
+const RECORD_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[2]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
+  "return redis.call('SET', KEYS[1], ARGV[1], 'NX')",
+].join("; ");
+const DELETE_TENANT_SCRIPT = [
+  "for _, key in ipairs(KEYS) do",
+  "local raw = redis.call('GET', key)",
+  "if raw then",
+  "local ok, record = pcall(cjson.decode, raw)",
+  "if not ok or type(record) ~= 'table' or type(record.authorizedAppId) ~= 'string' or type(record.merchantId) ~= 'string' then return -1 end",
+  "if record.authorizedAppId ~= ARGV[1] or record.merchantId ~= ARGV[2] then return -2 end",
+  "end",
+  "end",
+  "local deleted = 0",
+  "for _, key in ipairs(KEYS) do deleted = deleted + redis.call('DEL', key) end",
+  "return deleted",
+].join("\n");
 
 type Environment = Record<string, string | undefined>;
 type RedisCommand = Array<string | number>;
@@ -88,7 +117,7 @@ function validateRecord(record: InterestRecord) {
 }
 
 /** Idempotency is keyed on authorizedAppId + intent; the tenant id itself is hashed. */
-function interestKey(record: InterestRecord) {
+function interestKey(record: Pick<InterestRecord, "authorizedAppId" | "intent">) {
   const digest = createHash("sha256").update(record.authorizedAppId, "utf8").digest("base64url");
   return `${REDIS_KEY_PREFIX}${record.intent}:${digest}`;
 }
@@ -123,7 +152,7 @@ export class RedisRestInterestStore implements InterestStore {
     this.requestTimeoutMs = requestTimeoutMs;
   }
 
-  private async command(command: RedisCommand) {
+  private async command(command: RedisCommand, operation: InterestStoreOperation) {
     let response: Response;
     try {
       response = await this.fetchImpl(this.url, {
@@ -137,36 +166,81 @@ export class RedisRestInterestStore implements InterestStore {
         signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
     } catch {
-      throw new InterestStoreError("backend", "record");
+      throw new InterestStoreError("backend", operation);
     }
 
-    if (!response.ok) throw new InterestStoreError("backend", "record");
+    if (!response.ok) throw new InterestStoreError("backend", operation);
 
     let payload: unknown;
     try {
       payload = await response.json();
     } catch {
-      throw new InterestStoreError("backend", "record");
+      throw new InterestStoreError("backend", operation);
     }
 
     if (!isRecord(payload) || !("result" in payload) || ("error" in payload && payload.error)) {
-      throw new InterestStoreError("backend", "record");
+      throw new InterestStoreError("backend", operation);
     }
     return payload.result;
   }
 
   async record(record: InterestRecord): Promise<InterestRecordResult> {
     const validated = validateRecord(record);
-    const result = await this.command([
-      "SET",
-      interestKey(validated),
-      JSON.stringify(validated),
-      "NX",
-    ]);
+    const result = await this.command(
+      [
+        "EVAL",
+        RECORD_SCRIPT,
+        2,
+        interestKey(validated),
+        tenantDeletionKey(validated.authorizedAppId),
+        JSON.stringify(validated),
+      ],
+      "record",
+    );
 
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new InterestStoreError("tenant_deleted", "record");
+    }
     if (result === "OK") return "recorded";
     if (result === null) return "already_recorded";
     throw new InterestStoreError("backend", "record");
+  }
+
+  async deleteTenant(tenant: TenantIdentity): Promise<DeleteResult> {
+    let validated: TenantIdentity;
+    try {
+      validated = validateTenantIdentity(tenant);
+    } catch (error) {
+      if (error instanceof TenantIdentityError) {
+        throw new InterestStoreError("configuration", "delete_tenant");
+      }
+      throw error;
+    }
+    const keys = INTEREST_INTENTS.map((intent) =>
+      interestKey({ authorizedAppId: validated.authorizedAppId, intent }),
+    );
+    const result = await this.command(
+      [
+        "EVAL",
+        DELETE_TENANT_SCRIPT,
+        keys.length,
+        ...keys,
+        validated.authorizedAppId,
+        validated.merchantId,
+      ],
+      "delete_tenant",
+    );
+    if (result === -1) throw new InterestStoreError("corrupt_record", "delete_tenant");
+    if (result === -2) throw new InterestStoreError("tenant_mismatch", "delete_tenant");
+    if (
+      typeof result !== "number" ||
+      !Number.isSafeInteger(result) ||
+      result < 0 ||
+      result > keys.length
+    ) {
+      throw new InterestStoreError("backend", "delete_tenant");
+    }
+    return result > 0 ? "deleted" : "absent";
   }
 }
 
@@ -179,6 +253,49 @@ export class MemoryInterestStore implements InterestStore {
     if (this.entries.has(key)) return "already_recorded";
     this.entries.set(key, JSON.stringify(validated));
     return "recorded";
+  }
+
+  async deleteTenant(tenant: TenantIdentity): Promise<DeleteResult> {
+    let validated: TenantIdentity;
+    try {
+      validated = validateTenantIdentity(tenant);
+    } catch (error) {
+      if (error instanceof TenantIdentityError) {
+        throw new InterestStoreError("configuration", "delete_tenant");
+      }
+      throw error;
+    }
+    const keys = INTEREST_INTENTS.map((intent) =>
+      interestKey({ authorizedAppId: validated.authorizedAppId, intent }),
+    );
+
+    for (const key of keys) {
+      const raw = this.entries.get(key);
+      if (raw === undefined) continue;
+      let record: unknown;
+      try {
+        record = JSON.parse(raw);
+      } catch {
+        throw new InterestStoreError("corrupt_record", "delete_tenant");
+      }
+      if (
+        !isRecord(record) ||
+        typeof record.authorizedAppId !== "string" ||
+        typeof record.merchantId !== "string"
+      ) {
+        throw new InterestStoreError("corrupt_record", "delete_tenant");
+      }
+      if (
+        record.authorizedAppId !== validated.authorizedAppId ||
+        record.merchantId !== validated.merchantId
+      ) {
+        throw new InterestStoreError("tenant_mismatch", "delete_tenant");
+      }
+    }
+
+    let deleted = false;
+    for (const key of keys) deleted = this.entries.delete(key) || deleted;
+    return deleted ? "deleted" : "absent";
   }
 }
 
@@ -220,4 +337,9 @@ let configuredInterestStore: InterestStore | undefined;
 export async function recordInterest(record: InterestRecord) {
   configuredInterestStore ??= createInterestStore();
   return configuredInterestStore.record(record);
+}
+
+export async function deleteTenantInterestRecords(tenant: TenantIdentity) {
+  configuredInterestStore ??= createInterestStore();
+  return configuredInterestStore.deleteTenant(tenant);
 }

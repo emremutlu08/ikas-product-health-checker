@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { PRODUCT_SCAN_MAX_PRODUCTS } from "@/lib/ikas/product-adapter";
 import type { HealthIssue, HealthReport } from "@/lib/ikas/types";
@@ -204,11 +205,11 @@ describe("scan snapshot schema", () => {
 
     const command = commandOf(fetchMock);
     expect(command[0]).toBe("EVAL");
-    const persisted = JSON.parse(String(command[7])) as ScanSnapshot;
+    const persisted = JSON.parse(String(command[8])) as ScanSnapshot;
     expect(persisted).toEqual(snapshotFor());
-    expect(String(command[7])).not.toContain("accessToken");
-    expect(String(command[7])).not.toContain("refreshToken");
-    expect(String(command[7])).not.toContain("variants");
+    expect(String(command[8])).not.toContain("accessToken");
+    expect(String(command[8])).not.toContain("refreshToken");
+    expect(String(command[8])).not.toContain("variants");
     // The raw tenant identifiers must not leak into the Redis key space.
     expect(command[3]).not.toContain("app-1");
     expect(command[3]).not.toContain("merchant-1");
@@ -220,8 +221,8 @@ describe("scan snapshot schema", () => {
 
     await redisStore(fetchMock).putLatest(hostile as ScanSnapshot);
 
-    expect(String(commandOf(fetchMock)[7])).not.toContain("secret-token");
-    expect(String(commandOf(fetchMock)[7])).not.toContain("rawProducts");
+    expect(String(commandOf(fetchMock)[8])).not.toContain("secret-token");
+    expect(String(commandOf(fetchMock)[8])).not.toContain("rawProducts");
   });
 
   it("exposes safe snapshot metadata without tenant identifiers", () => {
@@ -649,9 +650,11 @@ describe("scan leases", () => {
     await redisStore(fetchMock).acquireScanLease(tenant, "owner-1", 30_000);
 
     const command = commandOf(fetchMock);
-    expect(command[0]).toBe("SET");
-    expect(command).toContain("NX");
-    expect(command).toContain("PX");
+    expect(command.slice(0, 3)).toEqual(["EVAL", expect.any(String), 2]);
+    expect(command[1]).toContain("'NX'");
+    expect(command[1]).toContain("'PX'");
+    expect(command[4]).not.toContain(tenant.authorizedAppId);
+    expect(command[4]).not.toContain(tenant.merchantId);
     expect(command).toContain(30_000);
   });
 
@@ -749,6 +752,72 @@ describe("reading the active scan lease", () => {
   });
 });
 
+describe("tenant snapshot cleanup", () => {
+  it("uses one atomic Redis command for the exact latest, history, and lease keys", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(redisResponse(3))
+      .mockResolvedValueOnce(redisResponse(0))
+      .mockResolvedValueOnce(redisResponse(4));
+    const store = redisStore(fetchMock);
+
+    await expect(store.deleteTenant(tenant)).resolves.toBe("deleted");
+    const command = commandOf(fetchMock);
+    const tenantHash = createHash("sha256")
+      .update([tenant.authorizedAppId, tenant.merchantId].join("\u0000"), "utf8")
+      .digest("base64url");
+    expect(command.slice(0, 3)).toEqual(["EVAL", expect.any(String), 3]);
+    expect(command.slice(3)).toEqual([
+      `ikas:scan-snapshot:v1:latest:${tenantHash}`,
+      `ikas:scan-history:v1:${tenantHash}`,
+      `ikas:scan-lease:v1:${tenantHash}`,
+    ]);
+    expect(String(command[1])).not.toContain("SCAN");
+    await expect(store.deleteTenant(tenant)).resolves.toBe("absent");
+    await expect(store.deleteTenant(tenant)).rejects.toMatchObject({
+      code: "backend",
+      operation: "delete",
+    });
+  });
+
+  it("deletes memory state, isolates tenants, and prevents an old lease from republishing", async () => {
+    const historyEnabled = { historyEnabled: true };
+    const store = new MemorySnapshotStore(Date.now, historyEnabled);
+    const lease = await store.acquireScanLease(tenant, "owner-1", 30_000);
+    if (!lease) throw new Error("expected lease");
+    await store.putLatest(snapshotFor(), lease, historyEnabled);
+    await store.putLatest(
+      snapshotFor({
+        scanId: "scan-other",
+        authorizedAppId: otherTenant.authorizedAppId,
+        merchantId: otherTenant.merchantId,
+      }),
+      undefined,
+      historyEnabled,
+    );
+
+    await expect(store.deleteTenant(tenant)).resolves.toBe("deleted");
+    await expect(store.getLatest(tenant)).resolves.toBeUndefined();
+    await expect(store.listHistory(tenant, historyEnabled)).resolves.toEqual([]);
+    await expect(store.hasActiveScanLease(tenant)).resolves.toBe(false);
+    await expect(store.putLatest(snapshotFor(), lease, historyEnabled)).rejects.toMatchObject({
+      code: "lease_lost",
+      operation: "put",
+    });
+    await expect(store.getLatest(otherTenant)).resolves.toMatchObject({ scanId: "scan-other" });
+    await expect(store.deleteTenant(tenant)).resolves.toBe("absent");
+  });
+
+  it("rejects invalid cleanup identity before touching Redis", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const store = redisStore(fetchMock);
+    await expect(
+      store.deleteTenant({ authorizedAppId: tenant.authorizedAppId, merchantId: "" }),
+    ).rejects.toMatchObject({ code: "configuration", operation: "delete" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("snapshot freshness", () => {
   const generatedAt = Date.parse("2026-07-20T08:00:00.000Z");
 
@@ -842,12 +911,12 @@ describe("bounded history retention", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const command = commandOf(fetchMock);
     expect(command[0]).toBe("EVAL");
-    expect(command[2]).toBe(3);
+    expect(command[2]).toBe(4);
     expect(String(command[1])).toContain("LPUSH");
     expect(String(command[1])).toContain("LTRIM");
     expect(command).toContain("owner-1");
     expect(command).toContain(String(MAX_HISTORY_ENTRIES));
-    const redisKeys = command.slice(3, 6).join(" ");
+    const redisKeys = command.slice(3, 7).join(" ");
     expect(redisKeys).not.toContain(tenant.authorizedAppId);
     expect(redisKeys).not.toContain(tenant.merchantId);
   });

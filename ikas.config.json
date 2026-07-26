@@ -1,8 +1,8 @@
 {
   "portMapping": {
-    "default": 3000
+    "default": 3100
   },
   "oauthRedirectPath": "/api/oauth/callback/ikas",
-  "runCommand": "pnpm run dev",
+  "runCommand": "npm run dev -- --port 3100",
   "actions": []
 }

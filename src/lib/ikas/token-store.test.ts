@@ -88,8 +88,8 @@ function createFakeRedisRest() {
       if (script.includes("PSETEX") && script.includes("INCR")) {
         const leaseKey = command[3];
         const fenceKey = command[4];
-        const ownerId = command[5];
-        const ttlMs = command[6];
+        const ownerId = command[6];
+        const ttlMs = command[7];
         if (
           typeof leaseKey !== "string" ||
           typeof fenceKey !== "string" ||
@@ -108,12 +108,53 @@ function createFakeRedisRest() {
       }
 
       const keyCount = command[2];
-      if (keyCount === 2) {
+      if (keyCount === 2 && script.includes("cjson.decode")) {
         const tokenKey = command[3];
         const leaseKey = command[4];
-        const leaseValue = command[5];
-        const expected = command[6];
-        const replacement = command[7];
+        const authorizedAppId = command[5];
+        const merchantId = command[6];
+        if (
+          typeof tokenKey !== "string" ||
+          typeof leaseKey !== "string" ||
+          typeof authorizedAppId !== "string" ||
+          typeof merchantId !== "string"
+        ) {
+          return jsonResponse({ error: "unsupported" });
+        }
+        const raw = getRecord(tokenKey);
+        if (raw !== undefined) {
+          let stored: unknown;
+          try {
+            stored = JSON.parse(raw);
+          } catch {
+            return jsonResponse({ result: -1 });
+          }
+          if (
+            typeof stored !== "object" ||
+            stored === null ||
+            typeof (stored as StoredIkasToken).authorizedAppId !== "string" ||
+            typeof (stored as StoredIkasToken).merchantId !== "string" ||
+            typeof (stored as StoredIkasToken).accessToken !== "string"
+          ) {
+            return jsonResponse({ result: -1 });
+          }
+          if (
+            (stored as StoredIkasToken).authorizedAppId !== authorizedAppId ||
+            (stored as StoredIkasToken).merchantId !== merchantId
+          ) {
+            return jsonResponse({ result: -2 });
+          }
+        }
+        const deleted = Number(deleteRecord(tokenKey)) + Number(deleteRecord(leaseKey));
+        return jsonResponse({ result: deleted });
+      }
+
+      if (keyCount === 3) {
+        const tokenKey = command[3];
+        const leaseKey = command[4];
+        const leaseValue = command[6];
+        const expected = command[7];
+        const replacement = command[8];
         if (
           typeof tokenKey !== "string" ||
           typeof leaseKey !== "string" ||
@@ -132,6 +173,43 @@ function createFakeRedisRest() {
           deleteRecord(tokenKey);
           return jsonResponse({ result: 1 });
         }
+      }
+
+      if (keyCount === 2 && script.includes("redis.call('GET', KEYS[2])")) {
+        const tokenKey = command[3];
+        const leaseKey = command[4];
+        const leaseValue = command[5];
+        const expected = command[6];
+        if (
+          typeof tokenKey !== "string" ||
+          typeof leaseKey !== "string" ||
+          typeof leaseValue !== "string" ||
+          typeof expected !== "string"
+        ) {
+          return jsonResponse({ error: "unsupported" });
+        }
+        if (getRecord(leaseKey) !== leaseValue) return jsonResponse({ result: -1 });
+        if (getRecord(tokenKey) !== expected) return jsonResponse({ result: 0 });
+        deleteRecord(tokenKey);
+        return jsonResponse({ result: 1 });
+      }
+
+      if (keyCount === 2) {
+        const tokenKey = command[3];
+        const valueOrExpected = command[5];
+        const replacement = command[6];
+        if (typeof tokenKey !== "string" || typeof valueOrExpected !== "string") {
+          return jsonResponse({ error: "unsupported" });
+        }
+        if (replacement === undefined) {
+          records.set(tokenKey, valueOrExpected);
+          return jsonResponse({ result: 1 });
+        }
+        if (typeof replacement !== "string" || getRecord(tokenKey) !== valueOrExpected) {
+          return jsonResponse({ result: 0 });
+        }
+        records.set(tokenKey, replacement);
+        return jsonResponse({ result: 1 });
       }
 
       const evalKey = command[3];
@@ -198,6 +276,79 @@ async function expectTokenStoreContract(store: TokenStore) {
   expect(await store.get(baseToken.authorizedAppId)).toBeUndefined();
 }
 
+async function expectTenantCleanupContract(store: TokenStore) {
+  const otherToken = {
+    ...baseToken,
+    authorizedAppId: "authorized-app-2",
+    merchantId: "merchant-2",
+    accessToken: "access-token-other",
+  };
+  await store.set(baseToken);
+  await store.set(otherToken);
+  const staleLease = await store.acquireRefreshLease(
+    baseToken.authorizedAppId,
+    "cleanup-owner-1",
+    30_000,
+  );
+  if (!staleLease) throw new Error("expected cleanup refresh lease");
+
+  await expect(
+    store.deleteTenant({
+      authorizedAppId: baseToken.authorizedAppId,
+      merchantId: baseToken.merchantId!,
+    }),
+  ).resolves.toBe("deleted");
+  await expect(store.get(baseToken.authorizedAppId)).resolves.toBeUndefined();
+  await expect(store.get(otherToken.authorizedAppId)).resolves.toEqual(otherToken);
+  await expect(
+    store.compareAndSetWithRefreshLease(staleLease, baseToken, {
+      ...baseToken,
+      accessToken: "must-not-republish",
+    }),
+  ).resolves.toBe(false);
+
+  const nextLease = await store.acquireRefreshLease(
+    baseToken.authorizedAppId,
+    "cleanup-owner-2",
+    30_000,
+  );
+  expect(nextLease?.fencingToken).toBe(2);
+  if (nextLease) await store.releaseRefreshLease(nextLease);
+  await expect(
+    store.deleteTenant({
+      authorizedAppId: baseToken.authorizedAppId,
+      merchantId: baseToken.merchantId!,
+    }),
+  ).resolves.toBe("absent");
+  await expect(store.get(otherToken.authorizedAppId)).resolves.toEqual(otherToken);
+}
+
+async function expectOrphanedLeaseCleanup(store: TokenStore) {
+  await store.set(baseToken);
+  const orphanedLease = await store.acquireRefreshLease(
+    baseToken.authorizedAppId,
+    "orphaned-cleanup-owner-1",
+    30_000,
+  );
+  if (!orphanedLease) throw new Error("expected orphaned refresh lease");
+
+  await store.delete(baseToken.authorizedAppId);
+  await expect(
+    store.deleteTenant({
+      authorizedAppId: baseToken.authorizedAppId,
+      merchantId: baseToken.merchantId!,
+    }),
+  ).resolves.toBe("deleted");
+
+  const successor = await store.acquireRefreshLease(
+    baseToken.authorizedAppId,
+    "orphaned-cleanup-owner-2",
+    30_000,
+  );
+  expect(successor?.fencingToken).toBe(2);
+  if (successor) await store.releaseRefreshLease(successor);
+}
+
 describe("TokenStore contract", () => {
   it("is implemented by the in-memory non-production store", async () => {
     await expectTokenStoreContract(new MemoryTokenStore());
@@ -233,8 +384,10 @@ describe("TokenStore contract", () => {
     await expectTokenStoreContract(store);
 
     expect(fakeRedis.fetchMock).toHaveBeenCalled();
-    expect(JSON.parse(String(fakeRedis.fetchMock.mock.calls[1]?.[1]?.body)).slice(0, 2)).toEqual([
-      "SET",
+    expect(JSON.parse(String(fakeRedis.fetchMock.mock.calls[1]?.[1]?.body)).slice(0, 4)).toEqual([
+      "EVAL",
+      expect.any(String),
+      2,
       "ikas:token:authorized-app-1",
     ]);
   });
@@ -300,7 +453,196 @@ describe("TokenStore contract", () => {
   });
 });
 
+describe("tenant-bound token cleanup", () => {
+  it("removes an orphaned refresh lease even when the token is already absent", async () => {
+    await expectOrphanedLeaseCleanup(new MemoryTokenStore());
+
+    let contents: string | undefined;
+    const readFile = vi.fn(async () => {
+      if (contents === undefined) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      return contents;
+    });
+    const writeFile = vi.fn(async (_filePath: string, value: string) => {
+      contents = value;
+    });
+    await expectOrphanedLeaseCleanup(
+      new FileTokenStore({
+        filePath: "/tmp/fake-orphaned-cleanup-token-store.json",
+        fileSystem: { readFile, writeFile } as never,
+      }),
+    );
+
+    const fakeRedis = createFakeRedisRest();
+    await expectOrphanedLeaseCleanup(
+      new RedisRestTokenStore({
+        url: REDIS_URL,
+        token: REDIS_TOKEN,
+        fetchImpl: fakeRedis.fetchMock as typeof fetch,
+      }),
+    );
+  });
+
+  it("is implemented by every token store and invalidates leases without resetting fencing", async () => {
+    await expectTenantCleanupContract(new MemoryTokenStore());
+
+    let contents: string | undefined;
+    const readFile = vi.fn(async () => {
+      if (contents === undefined) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      return contents;
+    });
+    const writeFile = vi.fn(async (_filePath: string, value: string) => {
+      contents = value;
+    });
+    await expectTenantCleanupContract(
+      new FileTokenStore({
+        filePath: "/tmp/fake-cleanup-token-store.json",
+        fileSystem: { readFile, writeFile } as never,
+      }),
+    );
+
+    const fakeRedis = createFakeRedisRest();
+    await expectTenantCleanupContract(
+      new RedisRestTokenStore({
+        url: REDIS_URL,
+        token: REDIS_TOKEN,
+        fetchImpl: fakeRedis.fetchMock as typeof fetch,
+      }),
+    );
+  });
+
+  it("fails closed on tenant mismatch or a stored token without a merchant identity", async () => {
+    const store = new MemoryTokenStore();
+    await store.set(baseToken);
+
+    await expect(
+      store.deleteTenant({
+        authorizedAppId: baseToken.authorizedAppId,
+        merchantId: "merchant-wrong",
+      }),
+    ).rejects.toMatchObject({ code: "tenant_mismatch", operation: "delete_tenant" });
+    await expect(store.get(baseToken.authorizedAppId)).resolves.toEqual(baseToken);
+
+    await store.set({ ...baseToken, merchantId: undefined });
+    await expect(
+      store.deleteTenant({
+        authorizedAppId: baseToken.authorizedAppId,
+        merchantId: baseToken.merchantId!,
+      }),
+    ).rejects.toMatchObject({ code: "corrupt_record", operation: "delete_tenant" });
+    await expect(store.get(baseToken.authorizedAppId)).resolves.toMatchObject({
+      accessToken: baseToken.accessToken,
+    });
+  });
+
+  it("uses one exact Redis script for token and lease, preserves the fence, and leaks no token", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ result: 1 }));
+    const store = new RedisRestTokenStore({
+      url: REDIS_URL,
+      token: REDIS_TOKEN,
+      fetchImpl: fetchMock,
+    });
+
+    await expect(
+      store.deleteTenant({
+        authorizedAppId: baseToken.authorizedAppId,
+        merchantId: baseToken.merchantId!,
+      }),
+    ).resolves.toBe("deleted");
+
+    const command = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(command.slice(0, 3)).toEqual(["EVAL", expect.any(String), 2]);
+    expect(command.slice(3, 5)).toEqual([
+      `ikas:token:${baseToken.authorizedAppId}`,
+      `ikas:token-refresh-lease:${baseToken.authorizedAppId}`,
+    ]);
+    expect(String(command[1])).not.toContain("then;");
+    expect(command).not.toContain(`ikas:token-refresh-fence:${baseToken.authorizedAppId}`);
+    expect(command.slice(5)).toEqual([baseToken.authorizedAppId, baseToken.merchantId]);
+    expect(JSON.stringify(command)).not.toContain(baseToken.accessToken);
+    expect(JSON.stringify(command)).not.toContain(baseToken.refreshToken);
+  });
+
+  it.each([
+    [-1, "corrupt_record"],
+    [-2, "tenant_mismatch"],
+    ["1", "backend"],
+    [3, "backend"],
+  ])("maps Redis cleanup result %j to %s without deleting speculatively", async (result, code) => {
+    const store = new RedisRestTokenStore({
+      url: REDIS_URL,
+      token: REDIS_TOKEN,
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ result })),
+    });
+
+    await expect(
+      store.deleteTenant({
+        authorizedAppId: baseToken.authorizedAppId,
+        merchantId: baseToken.merchantId!,
+      }),
+    ).rejects.toMatchObject({ code, operation: "delete_tenant" });
+  });
+
+  it("rejects invalid tenant identity before any Redis command", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const store = new RedisRestTokenStore({
+      url: REDIS_URL,
+      token: REDIS_TOKEN,
+      fetchImpl: fetchMock,
+    });
+    await expect(
+      store.deleteTenant({ authorizedAppId: baseToken.authorizedAppId, merchantId: "" }),
+    ).rejects.toMatchObject({ code: "configuration", operation: "delete_tenant" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("Redis refresh lease fencing", () => {
+  it("atomically rejects token writes and refresh lease mutations after tombstoning", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => jsonResponse({ result: "tenant_deleted" }));
+    const store = new RedisRestTokenStore({
+      url: REDIS_URL,
+      token: REDIS_TOKEN,
+      fetchImpl: fetchMock,
+    });
+    const replacement = { ...baseToken, accessToken: "replacement-token" };
+    const lease = {
+      authorizedAppId: baseToken.authorizedAppId,
+      ownerId: "owner-1",
+      fencingToken: 1,
+    };
+
+    await expect(store.set(baseToken)).rejects.toMatchObject({
+      code: "tenant_deleted",
+      operation: "set",
+    });
+    await expect(store.compareAndSet(baseToken, replacement)).rejects.toMatchObject({
+      code: "tenant_deleted",
+      operation: "set",
+    });
+    await expect(
+      store.acquireRefreshLease(baseToken.authorizedAppId, lease.ownerId, 30_000),
+    ).rejects.toMatchObject({ code: "tenant_deleted", operation: "lease" });
+    await expect(
+      store.compareAndSetWithRefreshLease(lease, baseToken, replacement),
+    ).rejects.toMatchObject({ code: "tenant_deleted", operation: "set" });
+
+    const commands = fetchMock.mock.calls.map(
+      (call) => JSON.parse(String(call[1]?.body)) as string[],
+    );
+    const tombstoneKeys = [
+      commands[0]?.[4],
+      commands[1]?.[4],
+      commands[2]?.[5],
+      commands[3]?.[5],
+    ];
+    expect(new Set(tombstoneKeys).size).toBe(1);
+    expect(tombstoneKeys[0]).toContain("ikas:tenant-deleted:v1:");
+    expect(tombstoneKeys[0]).not.toContain(baseToken.authorizedAppId);
+    expect(tombstoneKeys[0]).not.toContain(baseToken.merchantId);
+  });
+
   it("uses monotonic fences and an exact-value release that cannot delete a successor lease", async () => {
     const fakeRedis = createFakeRedisRest();
     const options = {
@@ -785,6 +1127,7 @@ describe("IkasTokenService refresh lifecycle", () => {
       get: (authorizedAppId) => backing.get(authorizedAppId),
       set: (token) => backing.set(token),
       delete: (authorizedAppId) => backing.delete(authorizedAppId),
+      deleteTenant: (tenant) => backing.deleteTenant(tenant),
       compareAndSet: vi.fn().mockRejectedValue(new TokenStoreError("backend", "set")),
       deleteIfMatches: (token) => backing.deleteIfMatches(token),
       acquireRefreshLease: (authorizedAppId, ownerId, ttlMs) =>
@@ -868,6 +1211,7 @@ describe("durable verification and configured memory behavior", () => {
       get: vi.fn().mockResolvedValue(undefined),
       set: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockResolvedValue(undefined),
+      deleteTenant: vi.fn().mockResolvedValue("absent"),
       compareAndSet: vi.fn().mockResolvedValue(false),
       deleteIfMatches: vi.fn().mockResolvedValue(false),
       acquireRefreshLease: vi.fn().mockResolvedValue(undefined),

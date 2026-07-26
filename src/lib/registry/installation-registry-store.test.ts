@@ -44,9 +44,9 @@ function createRedisHarness() {
     const name = String(command[0]).toUpperCase();
     if (name === "EVAL") {
       const key = String(command[3]);
-      const field = String(command[4]);
-      const value = String(command[5]);
-      const max = Number(command[6]);
+      const field = String(command[5]);
+      const value = String(command[6]);
+      const max = Number(command[7]);
       const target = hash(key);
       if (!target.has(field) && target.size >= max) return 0;
       target.set(field, value);
@@ -58,6 +58,9 @@ function createRedisHarness() {
     }
     if (name === "HGET") {
       return hash(String(command[1])).get(String(command[2])) ?? null;
+    }
+    if (name === "HDEL") {
+      return hash(String(command[1])).delete(String(command[2])) ? 1 : 0;
     }
     throw new Error(`unexpected command ${name}`);
   });
@@ -117,6 +120,29 @@ describe.each([
     expect(await store.list()).toEqual([{ ...TENANT_A, storeName: "dev-renamed" }]);
   });
 
+  it("idempotently unregisters only the exact tenant", async () => {
+    const { store } = build();
+    await store.register(TENANT_A);
+    await store.register(TENANT_B);
+
+    await expect(store.unregister(TENANT_A)).resolves.toBe("deleted");
+    await expect(store.unregister(TENANT_A)).resolves.toBe("absent");
+
+    expect(await store.has(TENANT_A)).toBe(false);
+    expect(await store.has(TENANT_B)).toBe(true);
+    expect(await store.list()).toEqual([TENANT_B]);
+  });
+
+  it("rejects an invalid unregister identity without deleting anything", async () => {
+    const { store } = build();
+    await store.register(TENANT_A);
+
+    await expect(
+      store.unregister({ authorizedAppId: TENANT_A.authorizedAppId, merchantId: "" }),
+    ).rejects.toMatchObject({ code: "configuration", operation: "unregister" });
+    expect(await store.list()).toEqual([TENANT_A]);
+  });
+
   it.each([
     { ...TENANT_A, authorizedAppId: "" },
     { ...TENANT_A, merchantId: "bad merchant" },
@@ -132,6 +158,47 @@ describe.each([
 });
 
 describe("RedisRestInstallationRegistryStore", () => {
+  it("atomically rejects registration after the durable tenant tombstone", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ result: "tenant_deleted" })));
+    const store = createRedisStore({ fetchImpl: fetchMock }).store;
+
+    await expect(store.register(TENANT_A)).rejects.toMatchObject({
+      code: "tenant_deleted",
+      operation: "register",
+    });
+    const command = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as string[];
+    expect(command.slice(0, 3)).toEqual(["EVAL", expect.any(String), 2]);
+    expect(command[4]).toContain("ikas:tenant-deleted:v1:");
+    expect(command[4]).not.toContain(TENANT_A.authorizedAppId);
+    expect(command[4]).not.toContain(TENANT_A.merchantId);
+  });
+
+  it("unregisters with one exact HDEL and rejects malformed Redis results", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: 1 }), {
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: "1" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    const store = createRedisStore({ fetchImpl: fetchMock }).store;
+
+    await expect(store.unregister(TENANT_A)).resolves.toBe("deleted");
+    const command = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(command).toEqual(["HDEL", REGISTRY_REDIS_KEY, expectedDigest(TENANT_A)]);
+    await expect(store.unregister(TENANT_A)).rejects.toMatchObject({
+      code: "backend",
+      operation: "unregister",
+    });
+  });
+
   it("keys registry fields by a NUL-separated tenant digest and never by raw ids", async () => {
     const { store, harness } = createRedisStore();
     await store.register(TENANT_A);

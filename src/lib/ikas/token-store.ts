@@ -2,6 +2,14 @@ import { config } from "@/globals/config";
 import { OAuthAPI } from "@ikas/admin-api-client";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import {
+  TENANT_DELETED_REDIS_RESULT,
+  TenantIdentityError,
+  tenantDeletionKey,
+  validateTenantIdentity,
+  type DeleteResult,
+  type TenantIdentity,
+} from "@/lib/lifecycle/tenant-identity";
 import { isValidStoreName } from "./store-name";
 
 export type StoredIkasToken = {
@@ -24,6 +32,7 @@ export interface TokenStore {
   get(authorizedAppId: string): Promise<StoredIkasToken | undefined>;
   set(token: StoredIkasToken): Promise<void>;
   delete(authorizedAppId: string): Promise<void>;
+  deleteTenant(tenant: TenantIdentity): Promise<DeleteResult>;
   compareAndSet(expected: StoredIkasToken, replacement: StoredIkasToken): Promise<boolean>;
   deleteIfMatches(expected: StoredIkasToken): Promise<boolean>;
   acquireRefreshLease(authorizedAppId: string, ownerId: string, ttlMs: number): Promise<RefreshLease | undefined>;
@@ -36,8 +45,20 @@ export interface TokenStore {
   releaseRefreshLease(lease: RefreshLease): Promise<boolean>;
 }
 
-export type TokenStoreErrorCode = "configuration" | "backend" | "corrupt_record" | "verification_failed";
-export type TokenStoreOperation = "configure" | "get" | "set" | "delete" | "lease";
+export type TokenStoreErrorCode =
+  | "configuration"
+  | "backend"
+  | "corrupt_record"
+  | "tenant_mismatch"
+  | "tenant_deleted"
+  | "verification_failed";
+export type TokenStoreOperation =
+  | "configure"
+  | "get"
+  | "set"
+  | "delete"
+  | "delete_tenant"
+  | "lease";
 
 export class TokenStoreError extends Error {
   readonly code: TokenStoreErrorCode;
@@ -82,18 +103,45 @@ const REFRESH_LEASE_TTL_MS = 30_000;
 const REFRESH_LEASE_WAIT_MS = 5_000;
 const REFRESH_LEASE_POLL_MS = 50;
 const CONFIRMED_REFRESH_AUTH_FAILURES = new Set(["invalid_grant", "invalid_refresh_token", "refresh_token_revoked"]);
-const COMPARE_AND_SET_SCRIPT =
-  "if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2]); return 1 else return 0 end";
+const SET_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[2]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
+  "redis.call('SET', KEYS[1], ARGV[1])",
+  "return 1",
+].join("; ");
+const COMPARE_AND_SET_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[2]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
+  "if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2]); return 1 else return 0 end",
+].join("; ");
 const DELETE_IF_MATCHES_SCRIPT =
   "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
-const ACQUIRE_REFRESH_LEASE_SCRIPT =
-  "if redis.call('EXISTS', KEYS[1]) == 1 then return {0, ''} end; local fence = redis.call('INCR', KEYS[2]); local value = tostring(fence) .. ':' .. ARGV[1]; redis.call('PSETEX', KEYS[1], ARGV[2], value); return {fence, value}";
-const COMPARE_AND_SET_WITH_REFRESH_LEASE_SCRIPT =
-  "if redis.call('GET', KEYS[2]) ~= ARGV[1] then return -1 end; if redis.call('GET', KEYS[1]) ~= ARGV[2] then return 0 end; redis.call('SET', KEYS[1], ARGV[3]); return 1";
+const ACQUIRE_REFRESH_LEASE_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[3]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
+  "if redis.call('EXISTS', KEYS[1]) == 1 then return {0, ''} end",
+  "local fence = redis.call('INCR', KEYS[2])",
+  "local value = tostring(fence) .. ':' .. ARGV[1]",
+  "redis.call('PSETEX', KEYS[1], ARGV[2], value)",
+  "return {fence, value}",
+].join("; ");
+const COMPARE_AND_SET_WITH_REFRESH_LEASE_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[3]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
+  "if redis.call('GET', KEYS[2]) ~= ARGV[1] then return -1 end",
+  "if redis.call('GET', KEYS[1]) ~= ARGV[2] then return 0 end",
+  "redis.call('SET', KEYS[1], ARGV[3])",
+  "return 1",
+].join("; ");
 const DELETE_IF_MATCHES_WITH_REFRESH_LEASE_SCRIPT =
   "if redis.call('GET', KEYS[2]) ~= ARGV[1] then return -1 end; if redis.call('GET', KEYS[1]) ~= ARGV[2] then return 0 end; redis.call('DEL', KEYS[1]); return 1";
 const RELEASE_REFRESH_LEASE_SCRIPT =
   "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
+const DELETE_TENANT_SCRIPT = [
+  "local raw = redis.call('GET', KEYS[1])",
+  "if raw then",
+  "local ok, record = pcall(cjson.decode, raw)",
+  "if not ok or type(record) ~= 'table' or type(record.authorizedAppId) ~= 'string' or record.authorizedAppId == '' or type(record.merchantId) ~= 'string' or record.merchantId == '' or type(record.accessToken) ~= 'string' or record.accessToken == '' then return -1 end",
+  "if record.authorizedAppId ~= ARGV[1] or record.merchantId ~= ARGV[2] then return -2 end",
+  "end",
+  "return redis.call('DEL', KEYS[1], KEYS[2])",
+].join("\n");
 
 type Environment = Record<string, string | undefined>;
 type RedisCommand = Array<string | number>;
@@ -163,6 +211,17 @@ function assertAuthorizedAppId(authorizedAppId: string, operation: TokenStoreOpe
   }
 }
 
+function validateCleanupTenant(tenant: TenantIdentity): TenantIdentity {
+  try {
+    return validateTenantIdentity(tenant);
+  } catch (error) {
+    if (error instanceof TenantIdentityError) {
+      throw new TokenStoreError("configuration", "delete_tenant");
+    }
+    throw error;
+  }
+}
+
 function assertLeaseOwnerId(ownerId: string) {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(ownerId)) {
     throw new TokenStoreError("configuration", "lease");
@@ -226,6 +285,28 @@ function validateTokenForWrite(token: StoredIkasToken) {
     }
     throw error;
   }
+}
+
+function validateStoredTokenForCleanup(
+  value: unknown,
+  tenant: TenantIdentity,
+): StoredIkasToken & { merchantId: string } {
+  let token: StoredIkasToken;
+  try {
+    token = parseStoredToken(value);
+  } catch {
+    throw new TokenStoreError("corrupt_record", "delete_tenant");
+  }
+  if (token.merchantId === undefined) {
+    throw new TokenStoreError("corrupt_record", "delete_tenant");
+  }
+  if (
+    token.authorizedAppId !== tenant.authorizedAppId ||
+    token.merchantId !== tenant.merchantId
+  ) {
+    throw new TokenStoreError("tenant_mismatch", "delete_tenant");
+  }
+  return token as StoredIkasToken & { merchantId: string };
 }
 
 function sameToken(left: StoredIkasToken, right: StoredIkasToken) {
@@ -344,16 +425,48 @@ export class RedisRestTokenStore implements TokenStore {
   async set(token: StoredIkasToken) {
     const validated = validateTokenForWrite(token);
     const result = await this.command(
-      ["SET", `${REDIS_KEY_PREFIX}${validated.authorizedAppId}`, JSON.stringify(validated)],
+      [
+        "EVAL",
+        SET_SCRIPT,
+        2,
+        `${REDIS_KEY_PREFIX}${validated.authorizedAppId}`,
+        tenantDeletionKey(validated.authorizedAppId),
+        JSON.stringify(validated),
+      ],
       "set",
     );
-    if (result !== "OK") throw new TokenStoreError("backend", "set");
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new TokenStoreError("tenant_deleted", "set");
+    }
+    if (result !== 1) throw new TokenStoreError("backend", "set");
   }
 
   async delete(authorizedAppId: string) {
     assertAuthorizedAppId(authorizedAppId, "delete");
     const result = await this.command(["DEL", `${REDIS_KEY_PREFIX}${authorizedAppId}`], "delete");
     if (typeof result !== "number") throw new TokenStoreError("backend", "delete");
+  }
+
+  async deleteTenant(tenant: TenantIdentity): Promise<DeleteResult> {
+    const validated = validateCleanupTenant(tenant);
+    const result = await this.command(
+      [
+        "EVAL",
+        DELETE_TENANT_SCRIPT,
+        2,
+        `${REDIS_KEY_PREFIX}${validated.authorizedAppId}`,
+        `${REDIS_REFRESH_LEASE_KEY_PREFIX}${validated.authorizedAppId}`,
+        validated.authorizedAppId,
+        validated.merchantId,
+      ],
+      "delete_tenant",
+    );
+    if (result === -1) throw new TokenStoreError("corrupt_record", "delete_tenant");
+    if (result === -2) throw new TokenStoreError("tenant_mismatch", "delete_tenant");
+    if (result !== 0 && result !== 1 && result !== 2) {
+      throw new TokenStoreError("backend", "delete_tenant");
+    }
+    return result > 0 ? "deleted" : "absent";
   }
 
   async compareAndSet(expected: StoredIkasToken, replacement: StoredIkasToken) {
@@ -366,13 +479,17 @@ export class RedisRestTokenStore implements TokenStore {
       [
         "EVAL",
         COMPARE_AND_SET_SCRIPT,
-        1,
+        2,
         `${REDIS_KEY_PREFIX}${validatedExpected.authorizedAppId}`,
+        tenantDeletionKey(validatedExpected.authorizedAppId),
         JSON.stringify(validatedExpected),
         JSON.stringify(validatedReplacement),
       ],
       "set",
     );
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new TokenStoreError("tenant_deleted", "set");
+    }
     if (result !== 0 && result !== 1) throw new TokenStoreError("backend", "set");
     return result === 1;
   }
@@ -401,14 +518,18 @@ export class RedisRestTokenStore implements TokenStore {
       [
         "EVAL",
         ACQUIRE_REFRESH_LEASE_SCRIPT,
-        2,
+        3,
         `${REDIS_REFRESH_LEASE_KEY_PREFIX}${authorizedAppId}`,
         `${REDIS_REFRESH_FENCE_KEY_PREFIX}${authorizedAppId}`,
+        tenantDeletionKey(authorizedAppId),
         ownerId,
         ttlMs,
       ],
       "lease",
     );
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new TokenStoreError("tenant_deleted", "lease");
+    }
     if (!Array.isArray(result) || result.length !== 2) throw new TokenStoreError("backend", "lease");
     const [fencingToken, storedValue] = result;
     if (fencingToken === 0 && storedValue === "") return undefined;
@@ -443,15 +564,19 @@ export class RedisRestTokenStore implements TokenStore {
       [
         "EVAL",
         COMPARE_AND_SET_WITH_REFRESH_LEASE_SCRIPT,
-        2,
+        3,
         `${REDIS_KEY_PREFIX}${validatedLease.authorizedAppId}`,
         `${REDIS_REFRESH_LEASE_KEY_PREFIX}${validatedLease.authorizedAppId}`,
+        tenantDeletionKey(validatedLease.authorizedAppId),
         refreshLeaseValue(validatedLease),
         JSON.stringify(validatedExpected),
         JSON.stringify(validatedReplacement),
       ],
       "set",
     );
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new TokenStoreError("tenant_deleted", "set");
+    }
     if (result !== -1 && result !== 0 && result !== 1) throw new TokenStoreError("backend", "set");
     return result === 1;
   }
@@ -537,6 +662,16 @@ export class MemoryTokenStore implements TokenStore {
   async delete(authorizedAppId: string) {
     assertAuthorizedAppId(authorizedAppId, "delete");
     this.tokens.delete(authorizedAppId);
+  }
+
+  async deleteTenant(tenant: TenantIdentity): Promise<DeleteResult> {
+    const validated = validateCleanupTenant(tenant);
+    const current = this.tokens.get(validated.authorizedAppId);
+    if (current) validateStoredTokenForCleanup(current, validated);
+    const deleted =
+      Number(this.tokens.delete(validated.authorizedAppId)) +
+      Number(this.refreshLeases.delete(validated.authorizedAppId));
+    return deleted > 0 ? "deleted" : "absent";
   }
 
   async compareAndSet(expected: StoredIkasToken, replacement: StoredIkasToken) {
@@ -698,6 +833,33 @@ export class FileTokenStore implements TokenStore {
     const tokens = await this.readAll();
     delete tokens[authorizedAppId];
     await this.writeAll(tokens, "delete");
+  }
+
+  async deleteTenant(tenant: TenantIdentity): Promise<DeleteResult> {
+    const validated = validateCleanupTenant(tenant);
+    let tokens: Record<string, StoredIkasToken>;
+    try {
+      tokens = await this.readAll();
+    } catch (error) {
+      if (error instanceof TokenStoreError) {
+        throw new TokenStoreError(error.code, "delete_tenant");
+      }
+      throw error;
+    }
+    const current = tokens[validated.authorizedAppId];
+    if (current) validateStoredTokenForCleanup(current, validated);
+
+    // Invalidate the lease before the file write so a stale refresher fails its second ownership
+    // check and cannot republish while cleanup is in progress. The fencing counter is untouched.
+    const deletedLease = this.refreshLeases.delete(validated.authorizedAppId);
+    if (!current) return deletedLease ? "deleted" : "absent";
+    delete tokens[validated.authorizedAppId];
+    try {
+      await this.writeAll(tokens, "delete");
+    } catch {
+      throw new TokenStoreError("backend", "delete_tenant");
+    }
+    return "deleted";
   }
 
   async compareAndSet(expected: StoredIkasToken, replacement: StoredIkasToken) {

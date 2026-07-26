@@ -118,7 +118,7 @@ The report page, JSON endpoint, and CSV endpoint derive tenant identity only fro
 
 Production refresh rotation is serialized by a distributed per-installation Redis lease with a monotonic fencing token. The lease winner re-reads the durable record before refresh; waiters re-read after acquisition/waiting, and token replacement, confirmed invalid-grant deletion, and lease release all verify the current lease owner/fence.
 
-Uninstall token cleanup remains a follow-up. Add it only after the exact ikas uninstall event name, payload, and signature-verification contract are confirmed from an in-repository integration contract.
+The internal tenant-bound uninstall cleanup foundation is implemented but intentionally unwired. Cleanup first writes a durable opaque deletion barrier; production Redis mutation scripts atomically reject later writes for that installation, preventing stale workers from recreating state. The non-expiring barrier is not automatically cleared because reuse of an `authorizedAppId` on reinstall is unverified. Add the webhook route and signature verification only after the exact ikas uninstall event name, payload bytes, secret source, replay policy, retry contract, and reinstall identity semantics are confirmed in the in-repository integration contract.
 
 Known dev-only console noise:
 

@@ -1,6 +1,14 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { TOKEN_STORE_ENV_KEYS } from "@/lib/ikas/token-store";
+import {
+  TENANT_DELETED_REDIS_RESULT,
+  TenantIdentityError,
+  tenantDeletionKey,
+  validateTenantIdentity,
+  type DeleteResult,
+  type TenantIdentity,
+} from "@/lib/lifecycle/tenant-identity";
 
 /**
  * Tenant-bound monitoring settings.
@@ -26,22 +34,21 @@ export const DEFAULT_MONITORING_SETTINGS: MonitoringSettings = {
   dailyEmailEnabled: false,
 };
 
-export type SettingsTenant = {
-  authorizedAppId: string;
-  merchantId: string;
-};
+export type SettingsTenant = TenantIdentity;
 
 export interface MonitoringSettingsStore {
   get(tenant: SettingsTenant): Promise<MonitoringSettings | undefined>;
   put(tenant: SettingsTenant, settings: MonitoringSettings): Promise<void>;
+  deleteTenant(tenant: SettingsTenant): Promise<DeleteResult>;
 }
 
 export type MonitoringSettingsStoreErrorCode =
   | "configuration"
   | "backend"
   | "corrupt_record"
-  | "payload_too_large";
-export type MonitoringSettingsStoreOperation = "configure" | "get" | "put";
+  | "payload_too_large"
+  | "tenant_deleted";
+export type MonitoringSettingsStoreOperation = "configure" | "get" | "put" | "delete";
 
 export class MonitoringSettingsStoreError extends Error {
   readonly code: MonitoringSettingsStoreErrorCode;
@@ -62,7 +69,11 @@ export class MonitoringSettingsStoreError extends Error {
 export const MAX_SETTINGS_BYTES = 512;
 const REDIS_KEY_PREFIX = "ikas:monitoring-settings:v1:";
 const REDIS_REQUEST_TIMEOUT_MS = 5_000;
-const TENANT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
+const PUT_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[2]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
+  "redis.call('SET', KEYS[1], ARGV[1])",
+  "return 1",
+].join("; ");
 
 type Environment = Record<string, string | undefined>;
 type RedisCommand = Array<string | number>;
@@ -117,16 +128,14 @@ function validateTenant(
   tenant: SettingsTenant,
   operation: MonitoringSettingsStoreOperation,
 ): SettingsTenant {
-  if (
-    !isRecord(tenant) ||
-    typeof tenant.authorizedAppId !== "string" ||
-    !TENANT_ID_PATTERN.test(tenant.authorizedAppId) ||
-    typeof tenant.merchantId !== "string" ||
-    !TENANT_ID_PATTERN.test(tenant.merchantId)
-  ) {
-    throw new MonitoringSettingsStoreError("configuration", operation);
+  try {
+    return validateTenantIdentity(tenant);
+  } catch (error) {
+    if (error instanceof TenantIdentityError) {
+      throw new MonitoringSettingsStoreError("configuration", operation);
+    }
+    throw error;
   }
-  return { authorizedAppId: tenant.authorizedAppId, merchantId: tenant.merchantId };
 }
 
 /** Both identifiers participate, so one tenant's key can never address another's record. */
@@ -236,8 +245,30 @@ export class RedisRestMonitoringSettingsStore implements MonitoringSettingsStore
   async put(tenant: SettingsTenant, settings: MonitoringSettings) {
     const validated = validateTenant(tenant, "put");
     const serialized = serializeSettings(validateSettingsForWrite(settings));
-    const result = await this.command(["SET", settingsKey(validated), serialized], "put");
-    if (result !== "OK") throw new MonitoringSettingsStoreError("backend", "put");
+    const result = await this.command(
+      [
+        "EVAL",
+        PUT_SCRIPT,
+        2,
+        settingsKey(validated),
+        tenantDeletionKey(validated.authorizedAppId),
+        serialized,
+      ],
+      "put",
+    );
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new MonitoringSettingsStoreError("tenant_deleted", "put");
+    }
+    if (result !== 1) throw new MonitoringSettingsStoreError("backend", "put");
+  }
+
+  async deleteTenant(tenant: SettingsTenant): Promise<DeleteResult> {
+    const validated = validateTenant(tenant, "delete");
+    const result = await this.command(["DEL", settingsKey(validated)], "delete");
+    if (result !== 0 && result !== 1) {
+      throw new MonitoringSettingsStoreError("backend", "delete");
+    }
+    return result === 1 ? "deleted" : "absent";
   }
 }
 
@@ -254,6 +285,11 @@ export class MemoryMonitoringSettingsStore implements MonitoringSettingsStore {
   async put(tenant: SettingsTenant, settings: MonitoringSettings) {
     const validated = validateTenant(tenant, "put");
     this.records.set(settingsKey(validated), serializeSettings(validateSettingsForWrite(settings)));
+  }
+
+  async deleteTenant(tenant: SettingsTenant): Promise<DeleteResult> {
+    const validated = validateTenant(tenant, "delete");
+    return this.records.delete(settingsKey(validated)) ? "deleted" : "absent";
   }
 }
 
@@ -311,4 +347,8 @@ export async function getTenantMonitoringSettings(tenant: SettingsTenant) {
 
 export async function putTenantMonitoringSettings(tenant: SettingsTenant, settings: MonitoringSettings) {
   return settingsStore().put(tenant, settings);
+}
+
+export async function deleteTenantMonitoringSettings(tenant: SettingsTenant) {
+  return settingsStore().deleteTenant(tenant);
 }

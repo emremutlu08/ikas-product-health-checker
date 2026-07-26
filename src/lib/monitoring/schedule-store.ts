@@ -1,10 +1,19 @@
 import { createHash } from "node:crypto";
 import { TOKEN_STORE_ENV_KEYS } from "@/lib/ikas/token-store";
+import {
+  TENANT_DELETED_REDIS_RESULT,
+  TenantIdentityError,
+  tenantDeletionKey,
+  validateTenantIdentity,
+  type DeleteResult,
+  type TenantIdentity,
+} from "@/lib/lifecycle/tenant-identity";
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 const REDIS_REQUEST_TIMEOUT_MS = 5_000;
 const REDIS_KEY_PREFIX = "ikas:monitoring-schedule:v2:";
 const CLAIM_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[4]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
   "local previous = redis.call('GET', KEYS[1])",
   "if previous and tonumber(ARGV[2]) - tonumber(previous) < tonumber(ARGV[3]) then return false end",
   "local acquired = redis.call('SET', KEYS[2], ARGV[1], 'NX', 'PX', ARGV[4])",
@@ -14,6 +23,7 @@ const CLAIM_SCRIPT = [
   "return delivery",
 ].join("; ");
 const COMPLETE_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[4]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
   "if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end",
   "redis.call('SET', KEYS[1], ARGV[2])",
   "redis.call('DEL', KEYS[2])",
@@ -25,14 +35,13 @@ const RELEASE_SCRIPT = [
   "redis.call('DEL', KEYS[1])",
   "return 1",
 ].join("; ");
+const DELETE_TENANT_SCRIPT =
+  "return redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])";
 
 type Environment = Record<string, string | undefined>;
 type RedisCommand = Array<string | number>;
 
-export type MonitoringScheduleTenant = {
-  authorizedAppId: string;
-  merchantId: string;
-};
+export type MonitoringScheduleTenant = TenantIdentity;
 
 export type MonitoringRunClaim = {
   tenant: MonitoringScheduleTenant;
@@ -50,10 +59,11 @@ export interface MonitoringScheduleStore {
   ): Promise<MonitoringRunClaim | undefined>;
   complete(claim: MonitoringRunClaim, completedAtMs: number): Promise<boolean>;
   release(claim: MonitoringRunClaim): Promise<boolean>;
+  deleteTenant(tenant: MonitoringScheduleTenant): Promise<DeleteResult>;
 }
 
 export class MonitoringScheduleStoreError extends Error {
-  readonly code: "configuration" | "backend";
+  readonly code: "configuration" | "backend" | "tenant_deleted";
 
   constructor(code: MonitoringScheduleStoreError["code"]) {
     super(`IKAS_MONITORING_SCHEDULE_${code.toUpperCase()}`);
@@ -63,10 +73,14 @@ export class MonitoringScheduleStoreError extends Error {
 }
 
 function validateTenant(tenant: MonitoringScheduleTenant) {
-  if (!SAFE_ID_PATTERN.test(tenant.authorizedAppId) || !SAFE_ID_PATTERN.test(tenant.merchantId)) {
-    throw new MonitoringScheduleStoreError("configuration");
+  try {
+    return validateTenantIdentity(tenant);
+  } catch (error) {
+    if (error instanceof TenantIdentityError) {
+      throw new MonitoringScheduleStoreError("configuration");
+    }
+    throw error;
   }
-  return tenant;
 }
 
 function validateOwner(ownerId: string) {
@@ -142,6 +156,15 @@ export class MemoryMonitoringScheduleStore implements MonitoringScheduleStore {
     this.leases.delete(key);
     return true;
   }
+
+  async deleteTenant(tenant: MonitoringScheduleTenant): Promise<DeleteResult> {
+    const key = scheduleBaseKey(tenant);
+    const deleted =
+      Number(this.successes.delete(key)) +
+      Number(this.leases.delete(key)) +
+      Number(this.deliveries.delete(key));
+    return deleted > 0 ? "deleted" : "absent";
+  }
 }
 
 export class RedisRestMonitoringScheduleStore implements MonitoringScheduleStore {
@@ -216,15 +239,19 @@ export class RedisRestMonitoringScheduleStore implements MonitoringScheduleStore
     const result = await this.command([
       "EVAL",
       CLAIM_SCRIPT,
-      3,
+      4,
       keys.success,
       keys.lease,
       keys.delivery,
+      tenantDeletionKey(tenant.authorizedAppId),
       ownerId,
       String(attemptedAtMs),
       String(minimumIntervalMs),
       String(leaseTtlMs),
     ]);
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new MonitoringScheduleStoreError("tenant_deleted");
+    }
     if (result === null || result === false || result === 0) return undefined;
     if (typeof result !== "string" || !SAFE_ID_PATTERN.test(result)) {
       throw new MonitoringScheduleStoreError("backend");
@@ -236,22 +263,48 @@ export class RedisRestMonitoringScheduleStore implements MonitoringScheduleStore
     validateOwner(claim.ownerId);
     validateTimestamp(completedAtMs);
     const keys = keysFor(claim.tenant);
-    return (await this.command([
+    const result = await this.command([
       "EVAL",
       COMPLETE_SCRIPT,
-      3,
+      4,
       keys.success,
       keys.lease,
       keys.delivery,
+      tenantDeletionKey(claim.tenant.authorizedAppId),
       claim.ownerId,
       String(completedAtMs),
-    ])) === 1;
+    ]);
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new MonitoringScheduleStoreError("tenant_deleted");
+    }
+    return result === 1;
   }
 
   async release(claim: MonitoringRunClaim) {
     validateOwner(claim.ownerId);
     const { lease } = keysFor(claim.tenant);
     return (await this.command(["EVAL", RELEASE_SCRIPT, 1, lease, claim.ownerId])) === 1;
+  }
+
+  async deleteTenant(tenant: MonitoringScheduleTenant): Promise<DeleteResult> {
+    const keys = keysFor(tenant);
+    const result = await this.command([
+      "EVAL",
+      DELETE_TENANT_SCRIPT,
+      3,
+      keys.success,
+      keys.lease,
+      keys.delivery,
+    ]);
+    if (
+      typeof result !== "number" ||
+      !Number.isSafeInteger(result) ||
+      result < 0 ||
+      result > 3
+    ) {
+      throw new MonitoringScheduleStoreError("backend");
+    }
+    return result > 0 ? "deleted" : "absent";
   }
 }
 
@@ -316,4 +369,8 @@ export function completeMonitoringRun(claim: MonitoringRunClaim, completedAtMs: 
 
 export function releaseMonitoringRun(claim: MonitoringRunClaim) {
   return scheduleStore().release(claim);
+}
+
+export function deleteTenantMonitoringSchedule(tenant: MonitoringScheduleTenant) {
+  return scheduleStore().deleteTenant(tenant);
 }

@@ -43,17 +43,19 @@ describe("RedisRestInterestStore", () => {
     await expect(store.record(tenant)).resolves.toBe("recorded");
 
     const command = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as string[];
-    expect(command[0]).toBe("SET");
-    expect(command.at(-1)).toBe("NX");
-    expect(JSON.parse(command[2])).toEqual({
+    expect(command.slice(0, 3)).toEqual(["EVAL", expect.any(String), 2]);
+    expect(command[1]).toContain("'NX'");
+    expect(JSON.parse(command[5])).toEqual({
       authorizedAppId: "app-1",
       merchantId: "merchant-1",
       intent: "low_stock_threshold_monitoring",
       createdAt: 1_784_000_000_000,
     });
     // The raw tenant id must not leak into the key space.
-    expect(command[1]).not.toContain("app-1");
-    expect(command[1]).toContain("low_stock_threshold_monitoring");
+    expect(command[3]).not.toContain("app-1");
+    expect(command[3]).toContain("low_stock_threshold_monitoring");
+    expect(command[4]).not.toContain("app-1");
+    expect(command[4]).not.toContain("merchant-1");
   });
 
   it("reports an existing signal as already recorded instead of overwriting it", async () => {
@@ -65,6 +67,39 @@ describe("RedisRestInterestStore", () => {
     });
 
     await expect(store.record(tenant)).resolves.toBe("already_recorded");
+  });
+
+  it("atomically deletes exact allowlisted interest keys after tenant verification", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(redisResponse(1))
+      .mockResolvedValueOnce(redisResponse(0))
+      .mockResolvedValueOnce(redisResponse(-1))
+      .mockResolvedValueOnce(redisResponse(-2))
+      .mockResolvedValueOnce(redisResponse("1"));
+    const store = new RedisRestInterestStore({
+      url: credentials.UPSTASH_REDIS_REST_URL,
+      token: credentials.UPSTASH_REDIS_REST_TOKEN,
+      fetchImpl: fetchMock,
+    });
+    const identity = {
+      authorizedAppId: tenant.authorizedAppId,
+      merchantId: tenant.merchantId,
+    };
+
+    await expect(store.deleteTenant(identity)).resolves.toBe("deleted");
+    const command = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(command.slice(0, 3)).toEqual(["EVAL", expect.any(String), 1]);
+    expect(command[3]).toContain("ikas:interest:v1:low_stock_threshold_monitoring:");
+    expect(String(command[3])).not.toContain(tenant.authorizedAppId);
+    expect(String(command[1])).not.toContain("SCAN");
+    expect(String(command[1])).not.toContain("then;");
+    expect(String(command[1])).not.toContain("do;");
+    expect(command.slice(4)).toEqual([identity.authorizedAppId, identity.merchantId]);
+    await expect(store.deleteTenant(identity)).resolves.toBe("absent");
+    await expect(store.deleteTenant(identity)).rejects.toMatchObject({ code: "corrupt_record" });
+    await expect(store.deleteTenant(identity)).rejects.toMatchObject({ code: "tenant_mismatch" });
+    await expect(store.deleteTenant(identity)).rejects.toMatchObject({ code: "backend" });
   });
 
   it("maps an unavailable backend to a sanitized store error", async () => {
@@ -104,6 +139,33 @@ describe("MemoryInterestStore", () => {
     await expect(store.record(tenant)).resolves.toBe("recorded");
     await expect(store.record({ ...tenant, createdAt: tenant.createdAt + 1000 })).resolves.toBe("already_recorded");
     await expect(store.record({ ...tenant, authorizedAppId: "app-2" })).resolves.toBe("recorded");
+  });
+
+  it("deletes only a matching tenant and fails closed on a merchant mismatch", async () => {
+    const store = new MemoryInterestStore();
+    const other = { ...tenant, authorizedAppId: "app-2", merchantId: "merchant-2" };
+    await store.record(tenant);
+    await store.record(other);
+
+    await expect(
+      store.deleteTenant({
+        authorizedAppId: tenant.authorizedAppId,
+        merchantId: "merchant-wrong",
+      }),
+    ).rejects.toMatchObject({ code: "tenant_mismatch" });
+    await expect(
+      store.deleteTenant({
+        authorizedAppId: tenant.authorizedAppId,
+        merchantId: tenant.merchantId,
+      }),
+    ).resolves.toBe("deleted");
+    await expect(
+      store.deleteTenant({
+        authorizedAppId: tenant.authorizedAppId,
+        merchantId: tenant.merchantId,
+      }),
+    ).resolves.toBe("absent");
+    await expect(store.record(other)).resolves.toBe("already_recorded");
   });
 });
 

@@ -5,6 +5,14 @@ import { assessHealth, type HealthAssessment } from "@/lib/health/health-model";
 import { ISSUE_TO_RULE, MISTAKE_RULE_CODES, RULE_LABELS } from "@/lib/ikas/health-rules";
 import { TOKEN_STORE_ENV_KEYS } from "@/lib/ikas/token-store";
 import type { HealthIssueCode, HealthReport, MistakeRuleCode } from "@/lib/ikas/types";
+import {
+  TENANT_DELETED_REDIS_RESULT,
+  TenantIdentityError,
+  tenantDeletionKey,
+  validateTenantIdentity,
+  type DeleteResult,
+  type TenantIdentity,
+} from "@/lib/lifecycle/tenant-identity";
 
 /**
  * Immutable, tenant-partitioned scan snapshots.
@@ -73,12 +81,19 @@ const REDIS_LEASE_KEY_PREFIX = "ikas:scan-lease:v1:";
 const REDIS_REQUEST_TIMEOUT_MS = 5_000;
 const RELEASE_LEASE_SCRIPT =
   "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
+const ACQUIRE_LEASE_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[2]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
+  "return redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2])",
+].join("; ");
 const PUT_WITH_HISTORY_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[4]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
   "if ARGV[1] ~= '' and redis.call('GET', KEYS[2]) ~= ARGV[1] then return -1 end",
   "redis.call('SET', KEYS[1], ARGV[2])",
   "if ARGV[3] == '1' then redis.call('LPUSH', KEYS[3], ARGV[2]); redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1) else redis.call('DEL', KEYS[3]) end",
   "return 1",
 ].join("; ");
+const DELETE_TENANT_SCRIPT =
+  "return redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])";
 
 const isoTimestamp = z
   .string()
@@ -326,10 +341,7 @@ export type SafeScanSnapshot = {
   report: Omit<HealthReport, "score">;
 };
 
-export type SnapshotTenant = {
-  authorizedAppId: string;
-  merchantId: string;
-};
+export type SnapshotTenant = TenantIdentity;
 
 export type ScanLease = SnapshotTenant & {
   ownerId: string;
@@ -374,6 +386,7 @@ export interface SnapshotStore {
    * what is already true.
    */
   hasActiveScanLease(tenant: SnapshotTenant): Promise<boolean>;
+  deleteTenant(tenant: SnapshotTenant): Promise<DeleteResult>;
 }
 
 export type SnapshotStoreErrorCode =
@@ -382,8 +395,9 @@ export type SnapshotStoreErrorCode =
   | "corrupt_record"
   | "history_disabled"
   | "lease_lost"
-  | "payload_too_large";
-export type SnapshotStoreOperation = "configure" | "get" | "put" | "lease" | "history";
+  | "payload_too_large"
+  | "tenant_deleted";
+export type SnapshotStoreOperation = "configure" | "get" | "put" | "lease" | "history" | "delete";
 
 export class SnapshotStoreError extends Error {
   readonly code: SnapshotStoreErrorCode;
@@ -419,16 +433,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function validateTenant(tenant: SnapshotTenant, operation: SnapshotStoreOperation): SnapshotTenant {
-  if (
-    !isRecord(tenant) ||
-    typeof tenant.authorizedAppId !== "string" ||
-    !TENANT_ID_PATTERN.test(tenant.authorizedAppId) ||
-    typeof tenant.merchantId !== "string" ||
-    !TENANT_ID_PATTERN.test(tenant.merchantId)
-  ) {
-    throw new SnapshotStoreError("configuration", operation);
+  try {
+    return validateTenantIdentity(tenant);
+  } catch (error) {
+    if (error instanceof TenantIdentityError) {
+      throw new SnapshotStoreError("configuration", operation);
+    }
+    throw error;
   }
-  return { authorizedAppId: tenant.authorizedAppId, merchantId: tenant.merchantId };
 }
 
 /**
@@ -652,10 +664,11 @@ export class RedisRestSnapshotStore implements SnapshotStore {
       [
         "EVAL",
         PUT_WITH_HISTORY_SCRIPT,
-        3,
+        4,
         latestKey(tenant),
         leaseKey(tenant),
         historyKey(tenant),
+        tenantDeletionKey(tenant.authorizedAppId),
         leaseOwner,
         serialized,
         policy.historyEnabled ? "1" : "0",
@@ -663,6 +676,9 @@ export class RedisRestSnapshotStore implements SnapshotStore {
       ],
       "put",
     );
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new SnapshotStoreError("tenant_deleted", "put");
+    }
     if (result === -1) throw new SnapshotStoreError("lease_lost", "put");
     if (result !== 1) throw new SnapshotStoreError("backend", "put");
   }
@@ -686,9 +702,20 @@ export class RedisRestSnapshotStore implements SnapshotStore {
   async acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number) {
     const lease = validateLeaseRequest(tenant, ownerId, ttlMs);
     const result = await this.command(
-      ["SET", leaseKey(lease), lease.ownerId, "NX", "PX", ttlMs],
+      [
+        "EVAL",
+        ACQUIRE_LEASE_SCRIPT,
+        2,
+        leaseKey(lease),
+        tenantDeletionKey(lease.authorizedAppId),
+        lease.ownerId,
+        ttlMs,
+      ],
       "lease",
     );
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new SnapshotStoreError("tenant_deleted", "lease");
+    }
     if (result === null) return undefined;
     if (result !== "OK") throw new SnapshotStoreError("backend", "lease");
     return lease;
@@ -712,6 +739,30 @@ export class RedisRestSnapshotStore implements SnapshotStore {
     if (result === null) return false;
     if (typeof result !== "string") throw new SnapshotStoreError("backend", "lease");
     return true;
+  }
+
+  async deleteTenant(tenant: SnapshotTenant): Promise<DeleteResult> {
+    const validated = validateTenant(tenant, "delete");
+    const result = await this.command(
+      [
+        "EVAL",
+        DELETE_TENANT_SCRIPT,
+        3,
+        latestKey(validated),
+        historyKey(validated),
+        leaseKey(validated),
+      ],
+      "delete",
+    );
+    if (
+      typeof result !== "number" ||
+      !Number.isSafeInteger(result) ||
+      result < 0 ||
+      result > 3
+    ) {
+      throw new SnapshotStoreError("backend", "delete");
+    }
+    return result > 0 ? "deleted" : "absent";
   }
 }
 
@@ -809,6 +860,15 @@ export class MemorySnapshotStore implements SnapshotStore {
     const validated = validateTenant(tenant, "lease");
     return Boolean(this.activeLease(leaseKey(validated)));
   }
+
+  async deleteTenant(tenant: SnapshotTenant): Promise<DeleteResult> {
+    const validated = validateTenant(tenant, "delete");
+    const deleted =
+      Number(this.snapshots.delete(latestKey(validated))) +
+      Number(this.histories.delete(historyKey(validated))) +
+      Number(this.leases.delete(leaseKey(validated)));
+    return deleted > 0 ? "deleted" : "absent";
+  }
 }
 
 function environmentValue(env: Environment, key: string) {
@@ -889,4 +949,8 @@ export async function releaseScanLease(lease: ScanLease) {
 
 export async function hasActiveScanLease(tenant: SnapshotTenant) {
   return snapshotStore().hasActiveScanLease(tenant);
+}
+
+export async function deleteTenantSnapshots(tenant: SnapshotTenant) {
+  return snapshotStore().deleteTenant(tenant);
 }

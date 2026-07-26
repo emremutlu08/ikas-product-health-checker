@@ -2,6 +2,14 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { isValidStoreName } from "@/lib/ikas/store-name";
 import { TOKEN_STORE_ENV_KEYS } from "@/lib/ikas/token-store";
+import {
+  TENANT_DELETED_REDIS_RESULT,
+  TenantIdentityError,
+  tenantDeletionKey,
+  validateTenantIdentity,
+  type DeleteResult,
+  type TenantIdentity,
+} from "@/lib/lifecycle/tenant-identity";
 
 /**
  * Durable index of installed tenants, used only by the server-side daily scheduler to know
@@ -19,9 +27,7 @@ import { TOKEN_STORE_ENV_KEYS } from "@/lib/ikas/token-store";
  * must reconstruct them to read snapshots and run scans; that value is server-only and never
  * served to a client.
  */
-export type InstallationRegistryRecord = {
-  authorizedAppId: string;
-  merchantId: string;
+export type InstallationRegistryRecord = TenantIdentity & {
   storeName: string;
 };
 
@@ -52,6 +58,7 @@ const REDIS_REQUEST_TIMEOUT_MS = 5_000;
  * that could race two concurrent installs.
  */
 const UPSERT_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[2]) == 1 then return '${TENANT_DELETED_REDIS_RESULT}' end`,
   "if redis.call('HEXISTS', KEYS[1], ARGV[1]) == 0 and redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[3]) then return 0 end",
   "redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])",
   "return 1",
@@ -62,8 +69,14 @@ export type InstallationRegistryStoreErrorCode =
   | "backend"
   | "corrupt_record"
   | "payload_too_large"
-  | "capacity";
-export type InstallationRegistryStoreOperation = "configure" | "register" | "list" | "reconcile";
+  | "capacity"
+  | "tenant_deleted";
+export type InstallationRegistryStoreOperation =
+  | "configure"
+  | "register"
+  | "unregister"
+  | "list"
+  | "reconcile";
 
 export class InstallationRegistryStoreError extends Error {
   readonly code: InstallationRegistryStoreErrorCode;
@@ -82,6 +95,7 @@ export class InstallationRegistryStoreError extends Error {
 
 export interface InstallationRegistryStore {
   register(record: InstallationRegistryRecord): Promise<void>;
+  unregister(identity: TenantIdentity): Promise<DeleteResult>;
   list(): Promise<InstallationRegistryRecord[]>;
   has(record: InstallationRegistryRecord): Promise<boolean>;
 }
@@ -135,8 +149,19 @@ function validateRecordForWrite(record: InstallationRegistryRecord): Installatio
   return parsed;
 }
 
+function validateRecordForUnregister(identity: TenantIdentity): TenantIdentity {
+  try {
+    return validateTenantIdentity(identity);
+  } catch (error) {
+    if (error instanceof TenantIdentityError) {
+      throw new InstallationRegistryStoreError("configuration", "unregister");
+    }
+    throw error;
+  }
+}
+
 /** Both identifiers participate, NUL-separated, so one tenant's field can never address another's. */
-function recordDigest(record: InstallationRegistryRecord) {
+function recordDigest(record: TenantIdentity) {
   return createHash("sha256")
     .update([record.authorizedAppId, record.merchantId].join("\u0000"), "utf8")
     .digest("base64url");
@@ -243,16 +268,32 @@ export class RedisRestInstallationRegistryStore implements InstallationRegistryS
       [
         "EVAL",
         UPSERT_SCRIPT,
-        1,
+        2,
         REGISTRY_REDIS_KEY,
+        tenantDeletionKey(validated.authorizedAppId),
         recordDigest(validated),
         serializeRecord(validated),
         String(MAX_REGISTRY_ENTRIES),
       ],
       "register",
     );
+    if (result === TENANT_DELETED_REDIS_RESULT) {
+      throw new InstallationRegistryStoreError("tenant_deleted", "register");
+    }
     if (result === 0) throw new InstallationRegistryStoreError("capacity", "register");
     if (result !== 1) throw new InstallationRegistryStoreError("backend", "register");
+  }
+
+  async unregister(identity: TenantIdentity): Promise<DeleteResult> {
+    const validated = validateRecordForUnregister(identity);
+    const result = await this.command(
+      ["HDEL", REGISTRY_REDIS_KEY, recordDigest(validated)],
+      "unregister",
+    );
+    if (result !== 0 && result !== 1) {
+      throw new InstallationRegistryStoreError("backend", "unregister");
+    }
+    return result === 1 ? "deleted" : "absent";
   }
 
   async list() {
@@ -297,6 +338,11 @@ export class MemoryInstallationRegistryStore implements InstallationRegistryStor
       throw new InstallationRegistryStoreError("capacity", "register");
     }
     this.fields.set(field, serialized);
+  }
+
+  async unregister(identity: TenantIdentity): Promise<DeleteResult> {
+    const validated = validateRecordForUnregister(identity);
+    return this.fields.delete(recordDigest(validated)) ? "deleted" : "absent";
   }
 
   async list() {
@@ -368,6 +414,10 @@ function registryStore() {
 
 export async function registerInstallation(record: InstallationRegistryRecord) {
   return registryStore().register(record);
+}
+
+export async function unregisterInstallation(identity: TenantIdentity) {
+  return registryStore().unregister(identity);
 }
 
 export async function isInstallationRegistered(record: InstallationRegistryRecord) {
