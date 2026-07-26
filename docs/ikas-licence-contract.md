@@ -73,11 +73,25 @@ These are unknown. The adapter fails closed on each rather than guessing.
   business failures are not established. The adapter treats `UNAUTHENTICATED` and
   `LOGIN_REQUIRED` as authentication failures and everything else as a generic upstream
   GraphQL error.
-- **First Pro listing key.** `product-health-pro-try-v1` is a proposed, centralized key only.
-  It has not been verified against a saved Partner-panel listing and must not be wired to
-  production entitlement until two-person verification is recorded.
+- **Per-app trial enforcement.** The plans guide states that a store "must be tracked in your
+  system from installation date" for a partner to enforce trial expiry. This app tracks no such
+  date: it trusts `status` alone. If a trial can lapse while `status` stays `ACTIVE`, a store that
+  never paid would keep a Pro grant. Unverified, and a real gap.
 - **Per-app trial and expiry data.** No trial window, renewal date, or expiry timestamp is
   known to exist on this type. Nothing in the app may assume one.
+
+## First Pro listing key — verified 2026-07-27
+
+`PRO_PLAN_KEY` is `productHealthPro`. It was created in the Partner panel under the configuration
+name "Product Health PRO" (TRY, yearly, 7-day trial) and read back from the panel's own generated
+"Konfigürasyon Anahtarı" field. The panel states the key is immutable once saved.
+
+The plans guide confirms the mapping this app relies on: `storeAppListingSubscriptionKey` on
+`getMerchantLicence` "determines which plan the merchant is using", and a free tier is the absence
+of a licence rather than a plan — free plans cannot be created on the Plans page at all, and produce
+no subscription or webhook data. That is exactly what `resolveEntitlement` implements.
+
+Source: https://builders.ikas.com/docs/app-development/admin-app/plans
 
 ## Why the caller still checks `merchantId`
 

@@ -3,10 +3,10 @@ import { PRO_PLAN_KEY, resolvePlanKey } from "./plan-catalog";
 
 describe("resolvePlanKey", () => {
   it("maps the immutable pro listing key to the pro tier", () => {
-    expect(PRO_PLAN_KEY).toBe("product-health-pro-try-v1");
+    expect(PRO_PLAN_KEY).toBe("productHealthPro");
     expect(resolvePlanKey(PRO_PLAN_KEY)).toEqual({
       known: true,
-      planKey: "product-health-pro-try-v1",
+      planKey: "productHealthPro",
       tier: "pro",
     });
   });
@@ -15,7 +15,7 @@ describe("resolvePlanKey", () => {
     for (const key of [
       "product-health-pro-try-v2",
       "PRODUCT-HEALTH-PRO-TRY-V1",
-      " product-health-pro-try-v1 ",
+      " productHealthPro ",
       "free",
       "",
       "__proto__",
@@ -29,7 +29,7 @@ describe("resolvePlanKey", () => {
   });
 
   it("default-denies non-string keys", () => {
-    for (const key of [undefined, null, 42, {}, ["product-health-pro-try-v1"]]) {
+    for (const key of [undefined, null, 42, {}, ["productHealthPro"]]) {
       expect(resolvePlanKey(key)).toEqual({ known: false });
     }
   });

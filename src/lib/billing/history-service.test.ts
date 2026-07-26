@@ -75,7 +75,7 @@ const activePro: Entitlement = {
   merchantId: installation.merchantId,
   tier: "pro" as const,
   state: "active" as const,
-  planKey: "product-health-pro-try-v1",
+  planKey: "productHealthPro",
   reason: "ACTIVE_KNOWN_PLAN" as const,
 };
 
