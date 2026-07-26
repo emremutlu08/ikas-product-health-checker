@@ -5,10 +5,10 @@
  * could half-land. The split matters: `APP_FULL_NAME` answers "which app is this" and belongs on
  * the surfaces a merchant might arrive at cold — the browser tab, the setup and error screens.
  * `APP_SECTION_NAME` is the dashboard's own name and belongs in navigation, where the full brand
- * would read badly ("Temel | Ürün Sağlığı Asistanına dön").
+ * would read badly ("TEMEL | Ürün Sağlığı Asistanına dön").
  */
 
-export const APP_BRAND = "Temel";
+export const APP_BRAND = "TEMEL";
 export const APP_NAME = "Ürün Sağlığı Asistanı";
 export const APP_FULL_NAME = `${APP_BRAND} | ${APP_NAME}`;
 
