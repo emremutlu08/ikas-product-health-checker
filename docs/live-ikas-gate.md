@@ -35,25 +35,7 @@ npx ikas app link
 npx ikas app dev
 ```
 
-Attempting `npx ikas app info` without an active login opens a Partners OAuth URL and waits for browser login. Hermes stopped there because permission/login must be completed by Emre.
-
-## Next manual step for Emre
-
-1. Run:
-
-```bash
-cd /Users/emremutlu/Apps/ikas-apps/ikas-product-health-checker
-npx ikas auth login
-```
-
-2. Complete the browser login/permission screen.
-3. Then run:
-
-```bash
-npx ikas app info
-```
-
-4. Share the output or tell Hermes to continue.
+As of 2026-07-26, Partner CLI authentication is active. `npx ikas app dev` can select `dev-emre2`, establish the development tunnel, and save the merchant app route without another login step.
 
 
 ## OAuth integration added
@@ -71,7 +53,33 @@ Production requires `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`. The l
 Concurrent refreshes are coordinated by a per-installation Redis lease with a monotonic fence. The winner and waiters re-read the durable record, and refresh writes, invalid-grant deletion, and safe release require the current owner/fence so a stale request cannot destroy a newer rotated token.
 
 
-## Live validation completed — 2026-07-06
+## Live validation completed — 2026-07-26
+
+Status: **passed** on `dev-emre2`.
+
+Observed runtime evidence:
+
+1. `npx ikas app dev` selected `dev-emre2`, opened a Cloudflare tunnel to local port 3100, and saved the app route.
+2. An already-authenticated Chrome Work profile opened the ikas merchant admin at the authorized-app route.
+3. The merchant admin displayed `dev-emre2` and `Ürün Sağlığı Asistanı`, and embedded the production app origin with ikas-signed launch parameters. Signed values were inspected only in memory and were not recorded.
+4. The app rendered the live dashboard for `dev-emre2` and exposed real catalog product names.
+5. `Şimdi tara` completed a fresh read-only scan; the UI reported `Tarama tamamlandı. Rapor bu taramanın sonucunu gösteriyor.`
+
+Fresh scan result shown by the app:
+
+- products scanned: 31
+- affected products: 31
+- health score: 0/100
+- critical issue count: 136
+- products in the critical table group: 30
+- missing SKU: 30
+- out of stock: 6
+- missing image, invalid price, duplicate SKU, duplicate title, and description issues: 0
+- observed product samples included `Basic Shorts Black`, `Classic Laptop Sleeve 14"`, `Daily Backpack`, and `Grid Tech Organizer - Black`
+
+This is observed signed-launch and live-catalog behavior, not merely unit-test, preview, or schema evidence.
+
+## Earlier live validation — 2026-07-06
 
 Status: **passed** on `dev-emremutlu`.
 
