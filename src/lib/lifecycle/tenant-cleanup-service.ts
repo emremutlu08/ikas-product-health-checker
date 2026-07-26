@@ -5,6 +5,7 @@ import type { InstallationRegistryStore } from "@/lib/registry/installation-regi
 import type { SnapshotStore } from "@/lib/scans/snapshot-store";
 import type { MonitoringSettingsStore } from "@/lib/settings/settings-store";
 import type { MutationOperationStore } from "@/lib/mutations/mutation-operation-store";
+import type { BulkBatchStore } from "@/lib/mutations/bulk-batch-store";
 import type { AlertOutboxStore, LowStockAlertStore } from "@/lib/alerts/alert-store";
 import type {
   MarkTenantDeletedResult,
@@ -22,6 +23,7 @@ export type TenantCleanupComponent =
   | "registry"
   | "token"
   | "mutation_operations"
+  | "bulk_batches"
   | "monitoring_schedule"
   | "snapshots"
   | "monitoring_settings"
@@ -57,6 +59,7 @@ export type TenantCleanupDependencies = {
   registry: Pick<InstallationRegistryStore, "unregister">;
   token: Pick<TokenStore, "deleteTenant">;
   mutationOperations: Pick<MutationOperationStore, "deleteTenant">;
+  bulkBatches: Pick<BulkBatchStore, "deleteTenant">;
   monitoringSchedule: Pick<MonitoringScheduleStore, "deleteTenant">;
   snapshots: Pick<SnapshotStore, "deleteTenant">;
   monitoringSettings: Pick<MonitoringSettingsStore, "deleteTenant">;
@@ -137,6 +140,7 @@ export class TenantCleanupService {
         component: "mutation_operations",
         run: () => this.stores.mutationOperations.deleteTenant(tenant),
       },
+      { component: "bulk_batches", run: () => this.stores.bulkBatches.deleteTenant(tenant) },
       {
         component: "monitoring_schedule",
         run: () => this.stores.monitoringSchedule.deleteTenant(tenant),

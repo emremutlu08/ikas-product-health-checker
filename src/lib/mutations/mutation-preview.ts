@@ -310,10 +310,17 @@ export async function buildCorrectionPreview(
  * Turns a preview into a one-time, tenant-bound, expiring confirmation. The client receives an
  * opaque operation id and nothing it could later replay with different values.
  */
+export type CorrectionPreparationOptions = {
+  /** A bulk item is the same operation with a batch tag, so the audit can group it. */
+  origin?: "single" | "bulk";
+  batchId?: string;
+};
+
 export async function prepareCorrection(
   installation: InstallationIdentity,
   request: CorrectionRequest,
   dependencies: CorrectionPreparationDependencies,
+  { origin = "single", batchId }: CorrectionPreparationOptions = {},
 ): Promise<CorrectionPreparation> {
   const { preview, plan } = await buildCorrectionPreview(installation, request, dependencies);
 
@@ -323,7 +330,8 @@ export async function prepareCorrection(
   const payload = {
     version: 2,
     operationId,
-    origin: "single",
+    origin,
+    ...(batchId ? { batchId } : {}),
     productId: preview.productId,
     variantId: preview.variantId,
     expectedProductUpdatedAt: preview.expectedProductUpdatedAt,
