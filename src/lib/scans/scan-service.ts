@@ -3,7 +3,11 @@ import { IkasAuthenticationError } from "@/lib/ikas/errors";
 import type { InstallationIdentity } from "@/lib/ikas/installation-auth";
 import { PRODUCT_SCAN_MAX_DURATION_MS } from "@/lib/ikas/product-adapter";
 import { collectProductHealthReport } from "@/lib/ikas/report-service";
-import type { HealthReport } from "@/lib/ikas/types";
+import type { HealthReport, IkasProduct } from "@/lib/ikas/types";
+import {
+  collectStockObservations,
+  type StockObservationSet,
+} from "@/lib/alerts/stock-observation";
 import {
   createSnapshotStore,
   hasActiveScanLease,
@@ -46,6 +50,7 @@ export type ManualScanDependencies = {
     now: Date,
     installation: InstallationIdentity,
     lowStockThreshold: number,
+    observe?: (products: IkasProduct[]) => void,
   ): Promise<HealthReport>;
   /** One active-Pro decision resolves both history retention and the low-stock threshold. */
   resolvePolicy(installation: InstallationIdentity): Promise<ScanExecutionPolicy>;
@@ -61,8 +66,8 @@ let configuredSnapshotStore: SnapshotStore | undefined;
 function defaultDependencies(): ManualScanDependencies {
   configuredSnapshotStore ??= createSnapshotStore();
   return {
-    collectReport: (now, installation, lowStockThreshold) =>
-      collectProductHealthReport(now, installation, { lowStockThreshold }),
+    collectReport: (now, installation, lowStockThreshold, observe) =>
+      collectProductHealthReport(now, installation, { lowStockThreshold, ...(observe ? { observe } : {}) }),
     resolvePolicy: (installation) => resolveInstallationScanPolicy(installation),
     snapshotStore: configuredSnapshotStore,
     now: () => new Date(),
@@ -73,11 +78,17 @@ function defaultDependencies(): ManualScanDependencies {
 
 export type ScheduledScanDependencies = Omit<ManualScanDependencies, "resolvePolicy">;
 
+/** A scan result plus the per-location stock projection low-stock alerting needs. */
+export type ScanExecutionResult = {
+  snapshot: ScanSnapshot;
+  observationSet: StockObservationSet;
+};
+
 async function executeScan(
   installation: InstallationIdentity,
   policy: ScanExecutionPolicy,
   dependencies: ScheduledScanDependencies,
-): Promise<ScanSnapshot> {
+): Promise<ScanExecutionResult> {
   const tenant = {
     authorizedAppId: installation.authorizedAppId,
     merchantId: installation.merchantId,
@@ -92,7 +103,15 @@ async function executeScan(
 
   try {
     const now = dependencies.now();
-    const report = await dependencies.collectReport(now, installation, policy.lowStockThreshold);
+    let observationSet: StockObservationSet = { observations: [], truncated: false };
+    const report = await dependencies.collectReport(
+      now,
+      installation,
+      policy.lowStockThreshold,
+      (products) => {
+        observationSet = collectStockObservations(products);
+      },
+    );
     const snapshot: ScanSnapshot = {
       version: 1,
       scanId: dependencies.createScanId(),
@@ -101,7 +120,7 @@ async function executeScan(
       report,
     };
     await dependencies.snapshotStore.putLatest(snapshot, lease, policy.retention);
-    return snapshot;
+    return { snapshot, observationSet };
   } finally {
     await dependencies.snapshotStore.releaseScanLease(lease).catch(() => undefined);
   }
@@ -119,7 +138,7 @@ export async function runManualScan(
   // budget. The resolver is fail-closed: anything except an active, tenant-bound Pro grant is
   // latest-only with threshold 0, while the Free manual scan remains available.
   const policy = await dependencies.resolvePolicy(installation);
-  return executeScan(installation, policy, dependencies);
+  return (await executeScan(installation, policy, dependencies)).snapshot;
 }
 
 /** Runs a scan from one already-authorized scheduler decision, avoiding a second entitlement read. */
@@ -127,7 +146,7 @@ export async function runScheduledScan(
   installation: InstallationIdentity,
   policy: ScanExecutionPolicy,
   dependencies: ScheduledScanDependencies = defaultDependencies(),
-): Promise<ScanSnapshot> {
+): Promise<ScanExecutionResult> {
   return executeScan(installation, policy, dependencies);
 }
 

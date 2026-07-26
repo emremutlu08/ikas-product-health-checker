@@ -33,6 +33,8 @@ function dependencies(
     monitoringSchedule: { deleteTenant: cleanup("monitoring_schedule") },
     snapshots: { deleteTenant: cleanup("snapshots") },
     monitoringSettings: { deleteTenant: cleanup("monitoring_settings") },
+    lowStockAlerts: { deleteTenant: cleanup("low_stock_alerts") },
+    alertOutbox: { deleteTenant: cleanup("alert_outbox") },
     interest: { deleteTenant: cleanup("interest_records") },
   } satisfies TenantCleanupDependencies;
 
@@ -53,6 +55,8 @@ describe("TenantCleanupService", () => {
       "monitoring_schedule",
       "snapshots",
       "monitoring_settings",
+      "low_stock_alerts",
+      "alert_outbox",
       "interest_records",
     ]);
     expect(result).toEqual({
@@ -65,6 +69,8 @@ describe("TenantCleanupService", () => {
         { component: "monitoring_schedule", status: "deleted" },
         { component: "snapshots", status: "deleted" },
         { component: "monitoring_settings", status: "deleted" },
+        { component: "low_stock_alerts", status: "deleted" },
+        { component: "alert_outbox", status: "deleted" },
         { component: "interest_records", status: "deleted" },
       ],
     });
@@ -93,6 +99,8 @@ describe("TenantCleanupService", () => {
       "monitoring_schedule",
       "snapshots",
       "monitoring_settings",
+      "low_stock_alerts",
+      "alert_outbox",
       "interest_records",
     ]);
     expect(result).toEqual({
@@ -105,6 +113,8 @@ describe("TenantCleanupService", () => {
         { component: "monitoring_schedule", status: "deleted" },
         { component: "snapshots", status: "failed", code: "cleanup_failed" },
         { component: "monitoring_settings", status: "absent" },
+        { component: "low_stock_alerts", status: "deleted" },
+        { component: "alert_outbox", status: "deleted" },
         { component: "interest_records", status: "deleted" },
       ],
     });
@@ -131,6 +141,8 @@ describe("TenantCleanupService", () => {
         { component: "monitoring_schedule", status: "absent" },
         { component: "snapshots", status: "absent" },
         { component: "monitoring_settings", status: "absent" },
+        { component: "low_stock_alerts", status: "absent" },
+        { component: "alert_outbox", status: "absent" },
         { component: "interest_records", status: "absent" },
       ],
     });

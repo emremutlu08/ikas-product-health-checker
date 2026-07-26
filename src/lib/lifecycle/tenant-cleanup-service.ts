@@ -5,6 +5,7 @@ import type { InstallationRegistryStore } from "@/lib/registry/installation-regi
 import type { SnapshotStore } from "@/lib/scans/snapshot-store";
 import type { MonitoringSettingsStore } from "@/lib/settings/settings-store";
 import type { MutationOperationStore } from "@/lib/mutations/mutation-operation-store";
+import type { AlertOutboxStore, LowStockAlertStore } from "@/lib/alerts/alert-store";
 import type {
   MarkTenantDeletedResult,
   TenantDeletionStore,
@@ -24,6 +25,8 @@ export type TenantCleanupComponent =
   | "monitoring_schedule"
   | "snapshots"
   | "monitoring_settings"
+  | "low_stock_alerts"
+  | "alert_outbox"
   | "interest_records";
 
 export type TenantCleanupFailureCode =
@@ -57,6 +60,8 @@ export type TenantCleanupDependencies = {
   monitoringSchedule: Pick<MonitoringScheduleStore, "deleteTenant">;
   snapshots: Pick<SnapshotStore, "deleteTenant">;
   monitoringSettings: Pick<MonitoringSettingsStore, "deleteTenant">;
+  lowStockAlerts: Pick<LowStockAlertStore, "deleteTenant">;
+  alertOutbox: Pick<AlertOutboxStore, "deleteTenant">;
   interest: Pick<InterestStore, "deleteTenant">;
 };
 
@@ -141,6 +146,11 @@ export class TenantCleanupService {
         component: "monitoring_settings",
         run: () => this.stores.monitoringSettings.deleteTenant(tenant),
       },
+      {
+        component: "low_stock_alerts",
+        run: () => this.stores.lowStockAlerts.deleteTenant(tenant),
+      },
+      { component: "alert_outbox", run: () => this.stores.alertOutbox.deleteTenant(tenant) },
       { component: "interest_records", run: () => this.stores.interest.deleteTenant(tenant) },
     ];
 

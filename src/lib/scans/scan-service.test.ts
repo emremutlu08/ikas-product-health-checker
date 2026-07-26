@@ -177,7 +177,7 @@ describe("runManualScan", () => {
 
     await runManualScan(installation, fixture.dependencies);
 
-    expect(collectReport).toHaveBeenCalledWith(expect.any(Date), installation, 25);
+    expect(collectReport).toHaveBeenCalledWith(expect.any(Date), installation, 25, expect.any(Function));
     // The licence/settings decision resolves before the scan begins.
     expect(order).toEqual(["policy", "collect"]);
   });
@@ -192,7 +192,7 @@ describe("runManualScan", () => {
     await expect(runManualScan(installation, fixture.dependencies)).resolves.toMatchObject({
       scanId: "scan-1",
     });
-    expect(collectReport).toHaveBeenCalledWith(expect.any(Date), installation, 0);
+    expect(collectReport).toHaveBeenCalledWith(expect.any(Date), installation, 0, expect.any(Function));
     await expect(
       fixture.snapshotStore.listHistory(installation, { historyEnabled: true }),
     ).resolves.toEqual([]);
@@ -328,8 +328,11 @@ describe("runScheduledScan", () => {
       new Date("2026-07-20T08:00:00.000Z"),
       installation,
       7,
+      expect.any(Function),
     );
-    expect(snapshot.report.score).toBe(82);
+    expect(snapshot.snapshot.report.score).toBe(82);
+    // The scheduled path also returns the per-location stock projection alerting needs.
+    expect(snapshot.observationSet).toEqual({ observations: [], truncated: false });
   });
 });
 

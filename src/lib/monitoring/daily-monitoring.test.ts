@@ -32,6 +32,13 @@ function snapshotFor(index: number): ScanSnapshot {
   };
 }
 
+function scanResultFor(index: number) {
+  return {
+    snapshot: snapshotFor(index),
+    observationSet: { observations: [], truncated: false },
+  };
+}
+
 function claimFor(installation: (typeof installations)[number], ownerId = "run-owner"): MonitoringRunClaim {
   return {
     tenant: { authorizedAppId: installation.authorizedAppId, merchantId: installation.merchantId },
@@ -48,8 +55,11 @@ function fixture(overrides: Partial<DailyMonitoringDependencies> = {}): DailyMon
     releaseRun: vi.fn().mockResolvedValue(true),
     resolveMonitoring: vi.fn().mockResolvedValue({ lowStockThreshold: 7, dailyEmailEnabled: true }),
     resolveRecipient: vi.fn().mockReturnValue({ email: "owner@example.com" }),
-    runScan: vi.fn(async (installation) => snapshotFor(Number(installation.authorizedAppId.split("-")[1]))),
+    runScan: vi.fn(async (installation) => scanResultFor(Number(installation.authorizedAppId.split("-")[1]))),
     sendEmail: vi.fn().mockResolvedValue(undefined),
+    readAlertState: vi.fn().mockResolvedValue({ state: {} }),
+    writeAlertState: vi.fn().mockResolvedValue(undefined),
+    deliverAlerts: vi.fn().mockResolvedValue({ status: "skipped", reason: "no_events" }),
     canonicalOrigin: () => "https://health.example.com",
     now: () => NOW,
     createRunOwnerId: () => "run-owner",
@@ -98,6 +108,9 @@ describe("daily monitoring scheduler", () => {
       sent: 4,
       emailSkipped: 2,
       emailFailed: 0,
+      alertsSent: 0,
+      alertsSkipped: 6,
+      alertsFailed: 0,
       busy: 0,
       failed: 0,
     });
@@ -111,7 +124,7 @@ describe("daily monitoring scheduler", () => {
       maximum = Math.max(maximum, active);
       await new Promise((resolve) => setTimeout(resolve, 2));
       active -= 1;
-      return snapshotFor(Number(installation.authorizedAppId.split("-")[1]));
+      return scanResultFor(Number(installation.authorizedAppId.split("-")[1]));
     });
     const dependencies = fixture({ runScan, maxScans: 6, concurrency: 3 });
 
@@ -131,7 +144,7 @@ describe("daily monitoring scheduler", () => {
         throw error;
       }
       if (installation.authorizedAppId === "app-2") throw new Error("private tenant failure");
-      return snapshotFor(Number(installation.authorizedAppId.split("-")[1]));
+      return scanResultFor(Number(installation.authorizedAppId.split("-")[1]));
     });
     const dependencies = fixture({ runScan, maxScans: 4 });
 
@@ -145,6 +158,9 @@ describe("daily monitoring scheduler", () => {
       sent: 2,
       emailSkipped: 0,
       emailFailed: 0,
+      alertsSent: 0,
+      alertsSkipped: 2,
+      alertsFailed: 0,
       busy: 1,
       failed: 1,
     });
@@ -207,7 +223,7 @@ describe("daily monitoring scheduler", () => {
       maxScans: 6,
       runScan: vi.fn(async (installation) => {
         scanned.add(installation.authorizedAppId);
-        return snapshotFor(Number(installation.authorizedAppId.split("-")[1]));
+        return scanResultFor(Number(installation.authorizedAppId.split("-")[1]));
       }),
     });
 
@@ -233,8 +249,109 @@ describe("daily monitoring scheduler", () => {
       sent: 0,
       emailSkipped: 0,
       emailFailed: 0,
+      alertsSent: 0,
+      alertsSkipped: 0,
+      alertsFailed: 0,
       busy: 0,
       failed: 0,
     });
+  });
+});
+
+/**
+ * Low-stock alerting rides on the scheduled scan rather than running as a second system, so these
+ * cover the seam: the threshold decides what is low, the e-mail consent decides whether anything
+ * is delivered, and the durable state is written either way.
+ */
+describe("low-stock alert delivery", () => {
+  const observation = {
+    productId: "product-1",
+    productName: "Classic Laptop Sleeve",
+    variantId: "variant-1",
+    stockLocationId: "location-1",
+    stockCount: 1,
+  };
+
+  function alertFixture(overrides: Partial<DailyMonitoringDependencies> = {}) {
+    return fixture({
+      listInstallations: vi.fn().mockResolvedValue([installations[0]]),
+      runScan: vi.fn(async () => ({
+        snapshot: snapshotFor(1),
+        observationSet: { observations: [observation], truncated: false },
+      })),
+      ...overrides,
+    });
+  }
+
+  it("delivers one grouped notification for a fresh crossing", async () => {
+    const dependencies = alertFixture({
+      deliverAlerts: vi.fn().mockResolvedValue({ status: "sent" }),
+    });
+
+    const result = await runDailyMonitoring(dependencies);
+
+    expect(result.alertsSent).toBe(1);
+    expect(dependencies.deliverAlerts).toHaveBeenCalledWith(
+      installations[0],
+      { email: "owner@example.com" },
+      [expect.objectContaining({ kind: "crossing", stockCount: 1 })],
+      "scan-1",
+      "store-1",
+    );
+    expect(dependencies.writeAlertState).toHaveBeenCalledWith(
+      installations[0],
+      expect.objectContaining({ lastScanId: "scan-1" }),
+    );
+  });
+
+  it("records the crossing but sends nothing when the merchant never enabled e-mail", async () => {
+    const dependencies = alertFixture({
+      resolveMonitoring: vi.fn().mockResolvedValue({ lowStockThreshold: 7, dailyEmailEnabled: false }),
+      deliverAlerts: vi.fn(),
+    });
+
+    const result = await runDailyMonitoring(dependencies);
+
+    expect(result.alertsSkipped).toBe(1);
+    expect(dependencies.deliverAlerts).not.toHaveBeenCalled();
+    expect(dependencies.writeAlertState).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing when no threshold is configured", async () => {
+    const dependencies = alertFixture({
+      resolveMonitoring: vi.fn().mockResolvedValue({ lowStockThreshold: 0, dailyEmailEnabled: true }),
+      deliverAlerts: vi.fn(),
+    });
+
+    const result = await runDailyMonitoring(dependencies);
+
+    expect(result.alertsSkipped).toBe(1);
+    expect(dependencies.readAlertState).not.toHaveBeenCalled();
+    expect(dependencies.deliverAlerts).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when the same scan is evaluated twice", async () => {
+    const dependencies = alertFixture({
+      readAlertState: vi.fn().mockResolvedValue({ state: {}, lastScanId: "scan-1" }),
+      deliverAlerts: vi.fn(),
+    });
+
+    const result = await runDailyMonitoring(dependencies);
+
+    expect(result.alertsSkipped).toBe(1);
+    expect(dependencies.writeAlertState).not.toHaveBeenCalled();
+    expect(dependencies.deliverAlerts).not.toHaveBeenCalled();
+  });
+
+  it("keeps the scan successful when the alert state store is unavailable", async () => {
+    const dependencies = alertFixture({
+      readAlertState: vi.fn().mockRejectedValue(new Error("redis down")),
+    });
+
+    const result = await runDailyMonitoring(dependencies);
+
+    expect(result.completed).toBe(1);
+    expect(result.alertsFailed).toBe(1);
+    expect(result.failed).toBe(0);
   });
 });

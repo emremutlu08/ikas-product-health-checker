@@ -104,20 +104,42 @@ export function isDailySummaryEmailConfigured(env: Environment = process.env) {
   }
 }
 
-export function createDailySummaryEmailSender({
+export type TransactionalEmail = { subject: string; text: string };
+
+export type TransactionalEmailSender = {
+  send(recipient: VerifiedRecipient, email: TransactionalEmail, idempotencyKey: string): Promise<void>;
+};
+
+const MAX_SUBJECT_LENGTH = 200;
+const MAX_TEXT_LENGTH = 20_000;
+
+/**
+ * The one outbound-mail transport. Every caller supplies its own body but shares the same verified
+ * recipient rule, the same configuration failure, and the same provider idempotency key — so a
+ * retry after a timeout cannot become a second delivery.
+ */
+export function createTransactionalEmailSender({
   env = process.env,
   fetchImpl = fetch,
 }: {
   env?: Environment;
   fetchImpl?: typeof fetch;
-} = {}): DailySummaryEmailSender {
+} = {}): TransactionalEmailSender {
   const { apiKey, from } = readEmailConfiguration(env);
 
   return {
-    async send(recipient, summary, idempotencyKey) {
+    async send(recipient, email, idempotencyKey) {
       if (!validEmail(recipient.email)) configurationError();
       if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) configurationError();
-      assertSummary(summary);
+      if (
+        email.subject.length === 0 ||
+        email.subject.length > MAX_SUBJECT_LENGTH ||
+        email.text.length === 0 ||
+        email.text.length > MAX_TEXT_LENGTH
+      ) {
+        configurationError();
+      }
+
       try {
         const response = await fetchImpl(RESEND_ENDPOINT, {
           method: "POST",
@@ -129,8 +151,8 @@ export function createDailySummaryEmailSender({
           body: JSON.stringify({
             from,
             to: [recipient.email],
-            subject: "Ürün Sağlığı günlük özeti",
-            text: textFor(summary),
+            subject: email.subject,
+            text: email.text,
           }),
           cache: "no-store",
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -147,6 +169,24 @@ export function createDailySummaryEmailSender({
         }
         throw new MonitoringEmailError("IKAS_MONITORING_EMAIL_DELIVERY_FAILED");
       }
+    },
+  };
+}
+
+export function createDailySummaryEmailSender(options: {
+  env?: Environment;
+  fetchImpl?: typeof fetch;
+} = {}): DailySummaryEmailSender {
+  const transport = createTransactionalEmailSender(options);
+
+  return {
+    async send(recipient, summary, idempotencyKey) {
+      assertSummary(summary);
+      await transport.send(
+        recipient,
+        { subject: "Ürün Sağlığı günlük özeti", text: textFor(summary) },
+        idempotencyKey,
+      );
     },
   };
 }

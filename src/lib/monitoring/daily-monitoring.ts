@@ -5,11 +5,25 @@ import {
   listRegisteredInstallations,
   type InstallationRegistryRecord,
 } from "@/lib/registry/installation-registry-store";
-import { runScheduledScan, ScanBusyError } from "@/lib/scans/scan-service";
+import { runScheduledScan, ScanBusyError, type ScanExecutionResult } from "@/lib/scans/scan-service";
 import type { ScanSnapshot } from "@/lib/scans/snapshot-store";
+import {
+  deliverLowStockAlerts,
+  type AlertDeliveryOutcome,
+} from "@/lib/alerts/alert-notifier";
+import {
+  alertOutboxStore,
+  lowStockAlertStore,
+  type AlertStateRecord,
+} from "@/lib/alerts/alert-store";
+import { evaluateLowStockAlerts } from "@/lib/alerts/low-stock-alerts";
 import { readMonitoringSettings, SettingsAccessError } from "@/lib/settings/settings-service";
 import type { MonitoringSettings } from "@/lib/settings/settings-store";
-import { createDailySummaryEmailSender, type DailyEmailSummary } from "./email-summary";
+import {
+  createDailySummaryEmailSender,
+  createTransactionalEmailSender,
+  type DailyEmailSummary,
+} from "./email-summary";
 import {
   claimMonitoringRunIfDue,
   completeMonitoringRun,
@@ -32,6 +46,10 @@ export type DailyMonitoringResult = {
   sent: number;
   emailSkipped: number;
   emailFailed: number;
+  /** Scans that produced at least one crossing or recovery notification. */
+  alertsSent: number;
+  alertsSkipped: number;
+  alertsFailed: number;
   busy: number;
   failed: number;
 };
@@ -52,8 +70,17 @@ export type DailyMonitoringDependencies = {
   runScan(
     installation: InstallationIdentity,
     policy: { retention: { historyEnabled: true }; lowStockThreshold: number },
-  ): Promise<ScanSnapshot>;
+  ): Promise<ScanExecutionResult>;
   sendEmail(recipient: VerifiedRecipient, summary: DailyEmailSummary, idempotencyKey: string): Promise<void>;
+  readAlertState(tenant: InstallationIdentity): Promise<AlertStateRecord>;
+  writeAlertState(tenant: InstallationIdentity, record: AlertStateRecord): Promise<void>;
+  deliverAlerts(
+    tenant: InstallationIdentity,
+    recipient: VerifiedRecipient,
+    events: Parameters<typeof deliverLowStockAlerts>[2],
+    scanId: string,
+    storeName: string,
+  ): Promise<AlertDeliveryOutcome>;
   canonicalOrigin(): string;
   now(): Date;
   createRunOwnerId(): string;
@@ -63,6 +90,7 @@ export type DailyMonitoringDependencies = {
 };
 
 let emailSender: ReturnType<typeof createDailySummaryEmailSender> | undefined;
+let alertSender: ReturnType<typeof createTransactionalEmailSender> | undefined;
 
 const defaultDependencies: DailyMonitoringDependencies = {
   listInstallations: listRegisteredInstallations,
@@ -86,6 +114,16 @@ const defaultDependencies: DailyMonitoringDependencies = {
   canonicalOrigin: getCanonicalAppOrigin,
   now: () => new Date(),
   createRunOwnerId: () => crypto.randomUUID(),
+  readAlertState: (tenant) => lowStockAlertStore().read(tenant),
+  writeAlertState: (tenant, record) => lowStockAlertStore().write(tenant, record),
+  deliverAlerts: (tenant, recipient, events, scanId, storeName) => {
+    alertSender ??= createTransactionalEmailSender();
+    return deliverLowStockAlerts(tenant, recipient, events, scanId, storeName, {
+      outbox: alertOutboxStore(),
+      sender: alertSender,
+      now: () => Date.now(),
+    });
+  },
 };
 
 function boundedInteger(value: number | undefined, fallback: number, maximum: number) {
@@ -120,6 +158,49 @@ function summaryFor(snapshot: ScanSnapshot, canonicalOrigin: string): DailyEmail
   };
 }
 
+/**
+ * Threshold state is kept even when nothing can be delivered, so the first message after a
+ * merchant enables e-mail describes a real change rather than replaying their whole backlog.
+ * A store failure here never fails the scan: the report is already durable.
+ */
+async function evaluateAndDeliverAlerts(
+  installation: InstallationIdentity,
+  recipient: VerifiedRecipient | undefined,
+  threshold: number,
+  scanId: string,
+  observationSet: Awaited<ReturnType<DailyMonitoringDependencies["runScan"]>>["observationSet"],
+  dependencies: DailyMonitoringDependencies,
+): Promise<"sent" | "failed" | "skipped"> {
+  if (threshold <= 0) return "skipped";
+
+  try {
+    const previous = await dependencies.readAlertState(installation);
+    const evaluation = evaluateLowStockAlerts({
+      observationSet,
+      previousState: previous.state,
+      threshold,
+      now: dependencies.now().getTime(),
+      scanId,
+      ...(previous.lastScanId ? { lastEvaluatedScanId: previous.lastScanId } : {}),
+    });
+    if (evaluation.skipped) return "skipped";
+
+    await dependencies.writeAlertState(installation, { state: evaluation.nextState, lastScanId: scanId });
+    if (!recipient || evaluation.events.length === 0) return "skipped";
+
+    const outcome = await dependencies.deliverAlerts(
+      installation,
+      recipient,
+      evaluation.events,
+      scanId,
+      installation.storeName,
+    );
+    return outcome.status === "sent" ? "sent" : outcome.status === "failed" ? "failed" : "skipped";
+  } catch {
+    return "failed";
+  }
+}
+
 export async function runDailyMonitoring(
   dependencies: DailyMonitoringDependencies = defaultDependencies,
 ): Promise<DailyMonitoringResult> {
@@ -145,6 +226,9 @@ export async function runDailyMonitoring(
     sent: 0,
     emailSkipped: 0,
     emailFailed: 0,
+    alertsSent: 0,
+    alertsSkipped: 0,
+    alertsFailed: 0,
     busy: 0,
     failed: 0,
   };
@@ -161,6 +245,8 @@ export async function runDailyMonitoring(
     try {
       const settings = await dependencies.resolveMonitoring(installation);
       if (!settings) continue;
+      // One consent covers both messages: a merchant who never turned e-mail on is not mailed
+      // just because they configured a threshold.
       const recipient = settings.dailyEmailEnabled
         ? dependencies.resolveRecipient(installation)
         : undefined;
@@ -185,10 +271,23 @@ export async function runDailyMonitoring(
     await Promise.all(
       chunk.map(async ({ installation, recipient, settings, claim }) => {
         try {
-          const snapshot = await dependencies.runScan(installation, {
+          const { snapshot, observationSet } = await dependencies.runScan(installation, {
             retention: { historyEnabled: true },
             lowStockThreshold: settings.lowStockThreshold,
           });
+
+          const alertOutcome = await evaluateAndDeliverAlerts(
+            installation,
+            recipient,
+            settings.lowStockThreshold,
+            snapshot.scanId,
+            observationSet,
+            dependencies,
+          );
+          if (alertOutcome === "sent") result.alertsSent += 1;
+          else if (alertOutcome === "failed") result.alertsFailed += 1;
+          else result.alertsSkipped += 1;
+
           let emailDelivered = false;
           let emailDeliveryFailed = false;
           if (settings.dailyEmailEnabled && recipient) {
