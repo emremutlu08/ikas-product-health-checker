@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyNotified,
   DEFAULT_ALERT_COOLDOWN_MS,
   MAX_TRACKED_ENTRIES,
   MISSING_ENTRY_RETENTION_MS,
@@ -52,6 +53,15 @@ function evaluate(
 
 const key = entryKeyFor(observation());
 
+/**
+ * Evaluate, then record that the notification was actually delivered. Every scenario below chains
+ * through this rather than reusing a starting state, because the split between "decided to tell
+ * them" and "told them" is the thing under test.
+ */
+function delivered(result: ReturnType<typeof evaluate>, now = NOW) {
+  return applyNotified(result.nextState, result.events, now);
+}
+
 describe("evaluateLowStockAlerts", () => {
   it("reports a first crossing and remembers it", () => {
     const result = evaluate([observation()]);
@@ -59,17 +69,31 @@ describe("evaluateLowStockAlerts", () => {
     expect(result.events).toEqual([
       expect.objectContaining({ kind: "crossing", stockCount: 2, threshold: THRESHOLD }),
     ]);
-    expect(result.nextState[key]).toMatchObject({
-      side: "below",
-      firstSeen: NOW,
+    // Evaluation alone records no notification; only a successful delivery does.
+    expect(result.nextState[key]).toMatchObject({ side: "below", firstSeen: NOW });
+    expect(result.nextState[key]!.lastNotifiedAt).toBeUndefined();
+    expect(delivered(result)[key]).toMatchObject({
       lastNotifiedAt: NOW,
       lastNotifiedSide: "below",
     });
   });
 
+  it("re-reports a crossing whose notification failed to reach the merchant", () => {
+    const first = evaluate([observation()]);
+    expect(first.events).toHaveLength(1);
+
+    // Delivery failed, so the state is written without the notified stamp.
+    const retry = evaluate([observation()], first.nextState, {
+      now: NOW + 60_000,
+      scanId: "scan-3",
+    });
+
+    expect(retry.events).toEqual([expect.objectContaining({ kind: "crossing" })]);
+  });
+
   it("does not repeat itself while the variant stays below the threshold", () => {
     const first = evaluate([observation()]);
-    const second = evaluate([observation({ stockCount: 1 })], first.nextState, {
+    const second = evaluate([observation({ stockCount: 1 })], delivered(first), {
       now: NOW + 60_000,
       scanId: "scan-3",
     });
@@ -87,15 +111,18 @@ describe("evaluateLowStockAlerts", () => {
 
   it("reports a recovery once, and only when the crossing was reported", () => {
     const crossed = evaluate([observation()]);
-    const recovered = evaluate([observation({ stockCount: 11 })], crossed.nextState, {
+    const recovered = evaluate([observation({ stockCount: 11 })], delivered(crossed), {
       now: NOW + 60_000,
       scanId: "scan-3",
     });
 
     expect(recovered.events).toEqual([expect.objectContaining({ kind: "recovery", stockCount: 11 })]);
-    expect(recovered.nextState[key]).toMatchObject({ side: "above", lastNotifiedSide: "above" });
+    expect(delivered(recovered, NOW + 60_000)[key]).toMatchObject({
+      side: "above",
+      lastNotifiedSide: "above",
+    });
 
-    const again = evaluate([observation({ stockCount: 11 })], recovered.nextState, {
+    const again = evaluate([observation({ stockCount: 11 })], delivered(recovered, NOW + 60_000), {
       now: NOW + 120_000,
       scanId: "scan-4",
     });
@@ -156,11 +183,10 @@ describe("evaluateLowStockAlerts", () => {
       scanId: "scan-4",
     });
     expect(afterCooldown.events).toEqual([expect.objectContaining({ kind: "crossing" })]);
-    expect(afterCooldown.nextState[key]).toMatchObject({ lastNotifiedSide: "below" });
 
-    // And still only once.
+    // And still only once, now that it has actually been delivered.
     expect(
-      evaluate([observation()], afterCooldown.nextState, {
+      evaluate([observation()], delivered(afterCooldown, NOW + DEFAULT_ALERT_COOLDOWN_MS), {
         now: NOW + DEFAULT_ALERT_COOLDOWN_MS * 3,
         scanId: "scan-5",
       }).events,
@@ -235,5 +261,23 @@ describe("evaluateLowStockAlerts", () => {
 
     expect(Object.keys(result.nextState)).toHaveLength(MAX_TRACKED_ENTRIES);
     expect(Object.values(result.nextState).every((entry) => entry.side === "below")).toBe(true);
+  });
+
+  it("does not re-notify a surviving entry after an overflow eviction", () => {
+    const observations = Array.from({ length: MAX_TRACKED_ENTRIES + 50 }, (_, index) =>
+      observation({ variantId: `variant-${index}`, stockCount: 1 }),
+    );
+    const first = evaluate(observations);
+    const state = delivered(first);
+
+    // Re-evaluated from the bounded state, not from the unbounded one the scan produced.
+    const second = evaluate(observations, state, { now: NOW + 60_000, scanId: "scan-3" });
+
+    // Only the entries eviction actually dropped may be reported again.
+    expect(second.events.length).toBe(observations.length - MAX_TRACKED_ENTRIES);
+    // And the ones that were kept are the ones the merchant was already told about.
+    expect(
+      Object.values(state).every((entry) => entry.lastNotifiedSide === "below"),
+    ).toBe(true);
   });
 });

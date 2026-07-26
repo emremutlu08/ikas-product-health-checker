@@ -5,11 +5,13 @@ import {
   describeCorrectionFailure,
   guardCorrectionRequest,
   logCorrectionFailure,
+  MAX_BULK_BODY_BYTES,
 } from "@/lib/mutations/correction-http";
 import {
   bulkWritesEnabled,
   createCorrectionReadRuntime,
   createCorrectionRuntime,
+  hasBulkWriteFeature,
   hasCorrectionWriteFeature,
 } from "@/lib/mutations/correction-runtime";
 import { bulkBatchStore, MAX_BULK_ITEMS } from "@/lib/mutations/bulk-batch-store";
@@ -68,14 +70,18 @@ function describeBulkFailure(error: unknown) {
 
 export async function POST(request: Request) {
   const correlationId = crypto.randomUUID();
-  const guard = await guardCorrectionRequest(request, bulkRequestSchema);
+  const guard = await guardCorrectionRequest(request, bulkRequestSchema, MAX_BULK_BODY_BYTES);
   if ("response" in guard) return guard.response;
 
   try {
     if (!bulkWritesEnabled()) {
       return correctionJson({ error: "IKAS_BULK_WRITE_DISABLED" }, 403);
     }
-    if (!(await hasCorrectionWriteFeature(guard.installation))) {
+    // Both grants: bulk is its own capability, and it still needs the single-write one it builds on.
+    if (
+      !(await hasCorrectionWriteFeature(guard.installation)) ||
+      !(await hasBulkWriteFeature(guard.installation))
+    ) {
       return correctionJson({ error: "IKAS_BULK_FEATURE_REQUIRED" }, 403);
     }
 

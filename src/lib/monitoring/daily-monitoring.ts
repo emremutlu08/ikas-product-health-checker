@@ -1,4 +1,5 @@
 import { getCanonicalAppOrigin } from "@/helpers/api-helpers";
+import { isInstallationFeatureEnabled } from "@/lib/billing/runtime-entitlement";
 import { assessHealth } from "@/lib/health/health-model";
 import type { InstallationIdentity } from "@/lib/ikas/installation-auth";
 import {
@@ -16,7 +17,7 @@ import {
   lowStockAlertStore,
   type AlertStateRecord,
 } from "@/lib/alerts/alert-store";
-import { evaluateLowStockAlerts } from "@/lib/alerts/low-stock-alerts";
+import { applyNotified, evaluateLowStockAlerts } from "@/lib/alerts/low-stock-alerts";
 import { readMonitoringSettings, SettingsAccessError } from "@/lib/settings/settings-service";
 import type { MonitoringSettings } from "@/lib/settings/settings-store";
 import {
@@ -72,6 +73,8 @@ export type DailyMonitoringDependencies = {
     policy: { retention: { historyEnabled: true }; lowStockThreshold: number },
   ): Promise<ScanExecutionResult>;
   sendEmail(recipient: VerifiedRecipient, summary: DailyEmailSummary, idempotencyKey: string): Promise<void>;
+  /** The grant the plan surface advertises for alerts, enforced before anything is delivered. */
+  hasAlertFeature(installation: InstallationIdentity): Promise<boolean>;
   readAlertState(tenant: InstallationIdentity): Promise<AlertStateRecord>;
   writeAlertState(tenant: InstallationIdentity, record: AlertStateRecord): Promise<void>;
   deliverAlerts(
@@ -114,6 +117,7 @@ const defaultDependencies: DailyMonitoringDependencies = {
   canonicalOrigin: getCanonicalAppOrigin,
   now: () => new Date(),
   createRunOwnerId: () => crypto.randomUUID(),
+  hasAlertFeature: (installation) => isInstallationFeatureEnabled(installation, "low-stock-alerts"),
   readAlertState: (tenant) => lowStockAlertStore().read(tenant),
   writeAlertState: (tenant, record) => lowStockAlertStore().write(tenant, record),
   deliverAlerts: (tenant, recipient, events, scanId, storeName) => {
@@ -162,6 +166,11 @@ function summaryFor(snapshot: ScanSnapshot, canonicalOrigin: string): DailyEmail
  * Threshold state is kept even when nothing can be delivered, so the first message after a
  * merchant enables e-mail describes a real change rather than replaying their whole backlog.
  * A store failure here never fails the scan: the report is already durable.
+ *
+ * The "we told them" stamp is written only after a delivery succeeds. Writing it up-front would
+ * make a failed e-mail look identical to a delivered one, and because each scan has its own
+ * idempotency key the outbox would never get a second chance either — the crossing would simply
+ * be lost.
  */
 async function evaluateAndDeliverAlerts(
   installation: InstallationIdentity,
@@ -183,18 +192,44 @@ async function evaluateAndDeliverAlerts(
       scanId,
       ...(previous.lastScanId ? { lastEvaluatedScanId: previous.lastScanId } : {}),
     });
-    if (evaluation.skipped) return "skipped";
+    if (evaluation.skipped) {
+      if (evaluation.skipped === "truncated_observation") {
+        // Silence here would look identical to "nothing was low", so an operator gets a signal.
+        console.warn(
+          JSON.stringify({ event: "ikas_low_stock_alerts_skipped", reason: evaluation.skipped }),
+        );
+      }
+      return "skipped";
+    }
 
-    await dependencies.writeAlertState(installation, { state: evaluation.nextState, lastScanId: scanId });
-    if (!recipient || evaluation.events.length === 0) return "skipped";
+    const deliverable =
+      Boolean(recipient) &&
+      evaluation.events.length > 0 &&
+      // Resolved only when there is something to send, so a quiet scan pays for no licence read.
+      (await dependencies.hasAlertFeature(installation));
+
+    if (!deliverable) {
+      await dependencies.writeAlertState(installation, {
+        state: evaluation.nextState,
+        lastScanId: scanId,
+      });
+      return "skipped";
+    }
 
     const outcome = await dependencies.deliverAlerts(
       installation,
-      recipient,
+      recipient!,
       evaluation.events,
       scanId,
       installation.storeName,
     );
+    await dependencies.writeAlertState(installation, {
+      state:
+        outcome.status === "sent"
+          ? applyNotified(evaluation.nextState, evaluation.events, dependencies.now().getTime())
+          : evaluation.nextState,
+      lastScanId: scanId,
+    });
     return outcome.status === "sent" ? "sent" : outcome.status === "failed" ? "failed" : "skipped";
   } catch {
     return "failed";

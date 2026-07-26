@@ -4,7 +4,7 @@ import { RedisRestTenantDeletionStore } from "@/lib/lifecycle/tenant-deletion-st
 import { computePlanHash, RedisBulkBatchStore, type BulkBatchRecord } from "./bulk-batch-store";
 import { buildSkuPayload } from "./mutation-fixtures";
 import { RedisRestMutationOperationStore } from "./mutation-operation-store";
-import { startUpstashRestShim, type UpstashShim } from "./upstash-rest-shim";
+import { startUpstashRestShim, type UpstashShim } from "../../../test-support/upstash-rest-shim";
 
 /**
  * Acceptance against a real Redis.

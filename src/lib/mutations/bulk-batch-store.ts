@@ -23,7 +23,13 @@ import {
  */
 
 export const MAX_BULK_ITEMS = 50;
-export const BULK_CONFIRMATION_TTL_MS = 15 * 60 * 1000;
+/**
+ * Short on purpose. Each item holds its own confirmation for `MAX_CONFIRMATION_TTL_MS`, so the
+ * window to confirm the batch plus the time the batch needs to run has to fit inside that. A
+ * longer confirmation window would let a batch be confirmed and then find every one of its items
+ * already expired.
+ */
+export const BULK_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 export const BULK_BATCH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_BATCH_PAYLOAD_BYTES = 32_768;
 export const BATCH_INDEX_LIMIT = 200;
@@ -117,9 +123,11 @@ export interface BulkBatchStore {
  * plan.
  */
 export function computePlanHash(batchId: string, items: readonly BulkPlanItem[]): string {
-  const canonical = items
-    .map((item) => [item.index, item.state, item.productId, item.variantId, item.operationId ?? ""].join(":"))
-    .join("|");
+  // JSON-encoded rather than delimiter-joined: `:` is a legal identifier character, so a joined
+  // form lets two different plans produce one canonical string.
+  const canonical = JSON.stringify(
+    items.map((item) => [item.index, item.state, item.productId, item.variantId, item.operationId ?? null]),
+  );
   return createHash("sha256").update(`${batchId}\n${canonical}`, "utf8").digest("base64url");
 }
 
@@ -218,6 +226,7 @@ const STATUS_SCRIPT = [
 ].join("\n");
 
 const GET_SCRIPT = [
+  `if redis.call('EXISTS', KEYS[2]) == 1 then return {'${TENANT_DELETED_REDIS_RESULT}'} end`,
   "local marker = redis.call('HGET', KEYS[1], 'tenantMarker')",
   "if not marker then return {'missing'} end",
   "if marker ~= ARGV[1] then return {'identity_mismatch'} end",
@@ -320,8 +329,9 @@ export class RedisBulkBatchStore implements BulkBatchStore {
       await this.command([
         "EVAL",
         GET_SCRIPT,
-        1,
+        2,
         batchKey(validated, batchId),
+        tenantDeletionKey(validated.authorizedAppId),
         tenantDeletionMarker(validated),
       ]),
     );

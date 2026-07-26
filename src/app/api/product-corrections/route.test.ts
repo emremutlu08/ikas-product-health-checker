@@ -349,9 +349,20 @@ describe("POST /api/product-corrections/undo", () => {
 });
 
 describe("GET /api/product-corrections/[operationId]", () => {
-  function statusRequest() {
-    return new Request(`${ORIGIN}/api/product-corrections/operation-1`);
+  function statusRequest({ origin = ORIGIN }: { origin?: string | null } = {}) {
+    const headers = new Headers();
+    if (origin !== null) headers.set("origin", origin);
+    return new Request(`${ORIGIN}/api/product-corrections/operation-1`, { headers });
   }
+
+  it("refuses a cross-site read, because it reconciles and therefore changes state", async () => {
+    const response = await statusRoute(statusRequest({ origin: null }), {
+      params: Promise.resolve({ operationId: "operation-1" }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(mocks.reconcileMutation).not.toHaveBeenCalled();
+  });
 
   it("returns the settled outcome without echoing the stored payload", async () => {
     mocks.mutationOperationStore.mockReturnValue({

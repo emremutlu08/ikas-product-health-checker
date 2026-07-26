@@ -37,6 +37,9 @@ export async function POST(request: Request) {
       readProduct,
       writer,
       now: () => Date.now(),
+      // A bulk item belongs to its batch: executing it here would slip past the separate bulk
+      // switch, and past a cancellation.
+      acceptsOrigin: (origin) => origin !== "bulk",
     });
 
     return correctionJson(result, 200);

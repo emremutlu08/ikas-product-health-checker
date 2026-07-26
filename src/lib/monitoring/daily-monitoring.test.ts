@@ -57,6 +57,7 @@ function fixture(overrides: Partial<DailyMonitoringDependencies> = {}): DailyMon
     resolveRecipient: vi.fn().mockReturnValue({ email: "owner@example.com" }),
     runScan: vi.fn(async (installation) => scanResultFor(Number(installation.authorizedAppId.split("-")[1]))),
     sendEmail: vi.fn().mockResolvedValue(undefined),
+    hasAlertFeature: vi.fn().mockResolvedValue(true),
     readAlertState: vi.fn().mockResolvedValue({ state: {} }),
     writeAlertState: vi.fn().mockResolvedValue(undefined),
     deliverAlerts: vi.fn().mockResolvedValue({ status: "skipped", reason: "no_events" }),

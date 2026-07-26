@@ -15,7 +15,7 @@ import {
   type CorrectionRequest,
 } from "./mutation-preview";
 import { prepareCorrection } from "./mutation-preview";
-import type { MutationOperationStore } from "./mutation-operation-store";
+import { MAX_CONFIRMATION_TTL_MS, type MutationOperationStore } from "./mutation-operation-store";
 import {
   executeConfirmedMutation,
   MutationExecutionError,
@@ -143,7 +143,8 @@ export async function planBulkCorrection(
         installation,
         request,
         dependencies,
-        { origin: "bulk", batchId },
+        // The longest window the store allows, so execution still has time after confirmation.
+        { origin: "bulk", batchId, ttlMs: MAX_CONFIRMATION_TTL_MS },
       );
       items.push({
         index,
@@ -203,9 +204,11 @@ async function chunked<T, R>(
 ): Promise<{ results: R[]; stopped: boolean }> {
   const results: R[] = [];
   for (let offset = 0; offset < items.length; offset += size) {
-    if (await shouldStop()) return { results, stopped: true };
     const chunk = items.slice(offset, offset + size);
     for (let inner = 0; inner < chunk.length; inner += concurrency) {
+      // Checked before every concurrency group, not only between chunks: a stop condition that can
+      // only be observed once per five items is not really a circuit breaker.
+      if (await shouldStop()) return { results, stopped: true };
       results.push(...(await Promise.all(chunk.slice(inner, inner + concurrency).map(run))));
     }
   }

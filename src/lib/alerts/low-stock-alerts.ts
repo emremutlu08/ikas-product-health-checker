@@ -7,6 +7,11 @@ import type { StockObservation, StockObservationSet } from "./stock-observation"
  * the awkward parts tractable: a repeated scan produces no second notification, a variant that sits
  * below the threshold for a week produces one, and a variant that recovers produces exactly one
  * recovery notice. Nothing here sends anything or reads a clock of its own.
+ *
+ * Crucially, evaluation does not record that anything *was* told. The "we told them" stamp is
+ * applied by `applyNotified` only after a delivery succeeds — otherwise a failed e-mail would be
+ * indistinguishable from a delivered one, and the merchant would never hear about that crossing
+ * again.
  */
 
 export type AlertSide = "below" | "above";
@@ -133,11 +138,9 @@ export function evaluateLowStockAlerts({
         side: "below",
         firstSeen: alreadyBelow ? previous.firstSeen : now,
         lastSeen: now,
-        ...(notify
-          ? { lastNotifiedAt: now, lastNotifiedSide: "below" as const }
-          : previous?.lastNotifiedAt !== undefined
-            ? { lastNotifiedAt: previous.lastNotifiedAt, lastNotifiedSide: previous.lastNotifiedSide }
-            : {}),
+        ...(previous?.lastNotifiedAt !== undefined
+          ? { lastNotifiedAt: previous.lastNotifiedAt, lastNotifiedSide: previous.lastNotifiedSide }
+          : {}),
       };
       continue;
     }
@@ -152,11 +155,9 @@ export function evaluateLowStockAlerts({
         side: "above",
         firstSeen: previous.firstSeen,
         lastSeen: now,
-        ...(notify
-          ? { lastNotifiedAt: now, lastNotifiedSide: "above" as const }
-          : previous.lastNotifiedAt !== undefined
-            ? { lastNotifiedAt: previous.lastNotifiedAt, lastNotifiedSide: previous.lastNotifiedSide }
-            : {}),
+        ...(previous.lastNotifiedAt !== undefined
+          ? { lastNotifiedAt: previous.lastNotifiedAt, lastNotifiedSide: previous.lastNotifiedSide }
+          : {}),
       };
       continue;
     }
@@ -178,16 +179,49 @@ export function evaluateLowStockAlerts({
 }
 
 /**
- * Keeps the durable record finite. Entries currently below the threshold are the ones a merchant
- * still needs, so they are kept first and the oldest recovered entries fall off.
+ * Records that the merchant has now been told, for the entries an actual delivery covered. Kept
+ * separate from evaluation so a failed send leaves the crossing pending rather than consumed.
+ */
+export function applyNotified(
+  state: AlertStateMap,
+  events: readonly LowStockAlertEvent[],
+  now: number,
+): AlertStateMap {
+  if (events.length === 0) return state;
+  const next: AlertStateMap = { ...state };
+  for (const event of events) {
+    const entry = next[event.entryKey];
+    if (!entry) continue;
+    next[event.entryKey] = {
+      ...entry,
+      lastNotifiedAt: now,
+      lastNotifiedSide: event.kind === "crossing" ? "below" : "above",
+    };
+  }
+  return next;
+}
+
+/**
+ * Keeps the durable record finite.
+ *
+ * Eviction order matters more than it looks: an entry that has been reported as below carries the
+ * only proof the merchant was already told, so dropping it makes the next scan re-report the same
+ * crossing. Those are kept longest; entries nobody has been told about are cheapest to lose.
  */
 function boundState(state: AlertStateMap): AlertStateMap {
   const entries = Object.entries(state);
   if (entries.length <= MAX_TRACKED_ENTRIES) return state;
 
-  entries.sort(([, left], [, right]) => {
-    if (left.side !== right.side) return left.side === "below" ? -1 : 1;
-    return right.lastSeen - left.lastSeen;
+  const rank = (entry: AlertEntryState) => {
+    if (entry.lastNotifiedSide === "below") return 0;
+    if (entry.side === "below") return 1;
+    return 2;
+  };
+  entries.sort(([leftKey, left], [rightKey, right]) => {
+    if (rank(left) !== rank(right)) return rank(left) - rank(right);
+    if (left.lastSeen !== right.lastSeen) return right.lastSeen - left.lastSeen;
+    // Deterministic tie-break, so the same overflow never evicts a different arbitrary slice.
+    return leftKey.localeCompare(rightKey);
   });
   return Object.fromEntries(entries.slice(0, MAX_TRACKED_ENTRIES));
 }

@@ -1,4 +1,9 @@
-import type { IkasProduct, IkasProductVariant } from "./types";
+import type {
+  IkasProduct,
+  IkasProductPrice,
+  IkasProductStockLocation,
+  IkasProductVariant,
+} from "./types";
 
 /**
  * What a confirmed mutation is not allowed to touch.
@@ -47,6 +52,22 @@ function priceListKey(priceListId: string | null | undefined) {
   return priceListId ?? DEFAULT_PRICE_LIST_KEY;
 }
 
+/** Stable ordering keys, so a reordered response is never mistaken for a changed one. */
+function priceIdentity(price: IkasProductPrice) {
+  return [
+    priceListKey(price.priceListId),
+    price.currencyCode ?? "",
+    price.sellPrice ?? "",
+    price.buyPrice ?? "",
+    price.discountPrice ?? "",
+  ].join("\u0000");
+}
+
+function stockIdentity(stock: IkasProductStockLocation) {
+  // A live row sorts before its soft-deleted twin, so the target path always addresses the live one.
+  return [stock.stockLocationId, stock.deleted ? "1" : "0", stock.id].join("\u0000");
+}
+
 function captureVariant(fields: Record<string, string>, variant: IkasProductVariant) {
   const base = `variant[${variant.id}]`;
   put(fields, `${base}.sku`, variant.sku ?? null);
@@ -68,10 +89,24 @@ function captureVariant(fields: Record<string, string>, variant: IkasProductVari
     put(fields, `${imageBase}.order`, image.order ?? null);
   }
 
-  const prices = variant.prices ?? [];
+  /**
+   * Prices and stocks can legitimately contain more than one row per price list or location — a
+   * soft-deleted stock row sits beside its live replacement, and `planPriceChange` has a branch for
+   * a duplicated default price list. Keying only by list/location would let the last row win, which
+   * both hides a clobbered duplicate and turns a reordered response into a false violation. So the
+   * rows are sorted deterministically and duplicates get a numbered suffix; the first row of each
+   * group keeps the plain path the mutation target addresses.
+   */
+  const prices = [...(variant.prices ?? [])].sort((left, right) =>
+    priceIdentity(left).localeCompare(priceIdentity(right)),
+  );
   put(fields, `${base}.prices.count`, prices.length);
+  const priceSeen = new Map<string, number>();
   for (const price of prices) {
-    const priceBase = `${base}.price[${priceListKey(price.priceListId)}]`;
+    const group = priceListKey(price.priceListId);
+    const seen = (priceSeen.get(group) ?? 0) + 1;
+    priceSeen.set(group, seen);
+    const priceBase = `${base}.price[${group}${seen === 1 ? "" : `#${seen}`}]`;
     put(fields, `${priceBase}.sellPrice`, price.sellPrice ?? null);
     put(fields, `${priceBase}.buyPrice`, price.buyPrice ?? null);
     put(fields, `${priceBase}.discountPrice`, price.discountPrice ?? null);
@@ -79,10 +114,15 @@ function captureVariant(fields: Record<string, string>, variant: IkasProductVari
     put(fields, `${priceBase}.currencySymbol`, price.currencySymbol ?? null);
   }
 
-  const stocks = variant.stocks ?? [];
+  const stocks = [...(variant.stocks ?? [])].sort((left, right) =>
+    stockIdentity(left).localeCompare(stockIdentity(right)),
+  );
   put(fields, `${base}.stocks.count`, stocks.length);
+  const stockSeen = new Map<string, number>();
   for (const stock of stocks) {
-    const stockBase = `${base}.stock[${stock.stockLocationId}]`;
+    const seen = (stockSeen.get(stock.stockLocationId) ?? 0) + 1;
+    stockSeen.set(stock.stockLocationId, seen);
+    const stockBase = `${base}.stock[${stock.stockLocationId}${seen === 1 ? "" : `#${seen}`}]`;
     put(fields, `${stockBase}.stockCount`, stock.stockCount);
     put(fields, `${stockBase}.deleted`, stock.deleted);
   }

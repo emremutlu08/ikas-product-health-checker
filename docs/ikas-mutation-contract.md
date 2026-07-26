@@ -94,6 +94,14 @@ field, which the earlier note in this file omitted; `UpdateVariantPricesInput` a
 
 The official schema explicitly states that the price objects supplied to this operation are **overridden**. Callers must therefore re-read the exact current price object, require explicit merchant confirmation, and submit every value that must survive the update.
 
+`UpdateProductVariantPricesInputPrice` has exactly three fields — `sellPrice`, `buyPrice`,
+`discountPrice`. There is **no currency field**, so currency cannot be resubmitted even in
+principle; it is a property of the price list. The application re-sends buy and discount prices
+verbatim and then relies on the whole-product invariant comparison to detect a currency that moved:
+`variant[…].price[…].currencyCode` and `.currencySymbol` are both snapshotted, so a currency wipe is
+reported as `invariant_violation` rather than as a success. Whether the platform can wipe it at all
+is unverified; the canary is what would establish that.
+
 **Not yet verified:** currency/price-list defaults, decimal rules, partial failures, idempotency, and concurrent price-edit behaviour.
 
 ## Verified stock webhook registration scopes

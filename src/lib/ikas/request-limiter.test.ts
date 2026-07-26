@@ -4,6 +4,8 @@ import {
   IkasRequestLimiter,
   IKAS_DOCUMENTED_REQUESTS_PER_WINDOW,
   DEFAULT_LIMITER_MAX_REQUESTS,
+  resetSharedIkasRequestLimiterForTests,
+  sharedIkasRequestLimiter,
 } from "./request-limiter";
 
 function clock(start = 1_000_000) {
@@ -66,14 +68,42 @@ describe("IkasRequestLimiter", () => {
     await expect(limiter.run(async () => "x")).rejects.toBeInstanceOf(IkasCircuitOpenError);
   });
 
-  it("closes the circuit only on an explicit reset", async () => {
+  it("closes the circuit again after its cooldown, without needing an operator", async () => {
+    const time = clock();
+    const limiter = new IkasRequestLimiter({
+      circuitFailureThreshold: 1,
+      circuitCooldownMs: 60_000,
+      now: time.now,
+      sleep: async () => {},
+    });
+
+    limiter.recordFailure();
+    expect(limiter.isCircuitOpen).toBe(true);
+    await expect(limiter.run(async () => "x")).rejects.toBeInstanceOf(IkasCircuitOpenError);
+
+    time.advance(60_000);
+    expect(limiter.isCircuitOpen).toBe(false);
+    await expect(limiter.run(async () => "x")).resolves.toBe("x");
+  });
+
+  it("closes the circuit immediately on a success", () => {
     const limiter = new IkasRequestLimiter({ circuitFailureThreshold: 1, sleep: async () => {} });
     limiter.recordFailure();
+
     limiter.recordSuccess();
 
-    expect(limiter.isCircuitOpen).toBe(true);
-    limiter.reset();
-    await expect(limiter.run(async () => "x")).resolves.toBe("x");
+    expect(limiter.isCircuitOpen).toBe(false);
+  });
+
+  it("keeps each installation's circuit to itself", async () => {
+    const first = sharedIkasRequestLimiter("app-1");
+    const second = sharedIkasRequestLimiter("app-2");
+    for (let attempt = 0; attempt < 10; attempt += 1) first.recordFailure();
+
+    expect(first.isCircuitOpen).toBe(true);
+    expect(second.isCircuitOpen).toBe(false);
+    expect(sharedIkasRequestLimiter("app-1")).toBe(first);
+    resetSharedIkasRequestLimiterForTests();
   });
 
   it("holds concurrency at the configured ceiling", async () => {

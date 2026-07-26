@@ -146,8 +146,13 @@ function rolloutOf(feature: AppFeature, signals: RolloutSignals): CapabilityRoll
         ? "available"
         : "needs_configuration";
     case "low-stock-alerts":
-      // Threshold crossing and recovery run off the scheduled scan, so they inherit its prerequisites.
-      return signals.schedulerEnabled ? "beta" : "needs_configuration";
+      // They run off the scheduled scan and go out through the same mail transport as the daily
+      // summary, so they need every one of its prerequisites — not just the scheduler.
+      return signals.schedulerEnabled &&
+        signals.emailDeliveryConfigured &&
+        signals.verifiedRecipientConfigured
+        ? "beta"
+        : "needs_configuration";
     case "product-corrections-write":
       return signals.productWritesEnabled ? "beta" : "development_store_only";
     case "bulk-corrections-write":

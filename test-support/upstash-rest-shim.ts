@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:https";
+import { Agent, createServer, request as httpsRequest, type Server } from "node:https";
 import { connect, type Socket } from "node:net";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -12,7 +12,12 @@ import path from "node:path";
  * Redis, with real atomicity and real concurrency — not by a stub that returns what the test
  * expects. So this speaks RESP to an actual server and re-frames the reply in the Upstash JSON
  * shape the stores already parse, and it serves over HTTPS because every store refuses a
- * plaintext endpoint. Nothing here is imported by application code.
+ * plaintext endpoint.
+ *
+ * It lives outside `src/` so it can never be reached from application code, and it relaxes
+ * certificate checking on its own agent rather than by setting `NODE_TLS_REJECT_UNAUTHORIZED` —
+ * that would disable verification for every other connection in the process, including the ones
+ * carrying the ikas token.
  */
 
 type RedisValue = string | number | null | RedisValue[];
@@ -185,19 +190,47 @@ export async function startUpstashRestShim({
     });
   });
 
-  const previousTlsSetting = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  // Scoped to this agent: no other connection in the process loses certificate verification.
+  const agent = new Agent({ rejectUnauthorized: false, keepAlive: true });
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => {
+      const target = new URL(typeof input === "string" ? input : String(input));
+      const call = httpsRequest(
+        {
+          agent,
+          hostname: target.hostname,
+          port: target.port,
+          path: target.pathname || "/",
+          method: init?.method ?? "GET",
+          headers: Object.fromEntries(new Headers(init?.headers).entries()),
+        },
+        (incoming) => {
+          const chunks: Buffer[] = [];
+          incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+          incoming.on("end", () => {
+            resolve(
+              new Response(Buffer.concat(chunks), {
+                status: incoming.statusCode ?? 500,
+                headers: { "content-type": "application/json" },
+              }),
+            );
+          });
+        },
+      );
+      call.on("error", reject);
+      if (init?.body) call.write(String(init.body));
+      call.end();
+    })) as unknown as typeof fetch;
 
   return {
     url: `https://127.0.0.1:${shimPort}`,
     token,
-    fetchImpl: fetch,
+    fetchImpl,
     async flush() {
       await connection.send(["FLUSHALL"]);
     },
     async close() {
-      if (previousTlsSetting === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTlsSetting;
+      agent.destroy();
       connection.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },

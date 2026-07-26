@@ -314,18 +314,20 @@ export type CorrectionPreparationOptions = {
   /** A bulk item is the same operation with a batch tag, so the audit can group it. */
   origin?: "single" | "bulk";
   batchId?: string;
+  /** Bulk items get the longer window, because a batch still has to run after it is confirmed. */
+  ttlMs?: number;
 };
 
 export async function prepareCorrection(
   installation: InstallationIdentity,
   request: CorrectionRequest,
   dependencies: CorrectionPreparationDependencies,
-  { origin = "single", batchId }: CorrectionPreparationOptions = {},
+  { origin = "single", batchId, ttlMs = MUTATION_CONFIRMATION_TTL_MS }: CorrectionPreparationOptions = {},
 ): Promise<CorrectionPreparation> {
   const { preview, plan } = await buildCorrectionPreview(installation, request, dependencies);
 
   const createdAt = dependencies.now();
-  const expiresAt = createdAt + MUTATION_CONFIRMATION_TTL_MS;
+  const expiresAt = createdAt + ttlMs;
   const operationId = dependencies.createOperationId();
   const payload = {
     version: 2,

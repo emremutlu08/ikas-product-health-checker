@@ -1,6 +1,7 @@
 import {
   correctionJson,
   describeCorrectionFailure,
+  isSameOrigin,
   logCorrectionFailure,
   operationReferenceSchema,
 } from "@/lib/mutations/correction-http";
@@ -19,10 +20,16 @@ export const dynamic = "force-dynamic";
  * live catalog rather than repeating a non-idempotent write, so a merchant who reloads after a
  * dropped connection gets a real answer instead of a spinner.
  */
-export async function GET(_request: Request, context: { params: Promise<{ operationId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ operationId: string }> }) {
   const correlationId = crypto.randomUUID();
 
   try {
+    // This read is state-changing — it reconciles an abandoned operation — so it carries the same
+    // same-origin requirement as the routes that write.
+    if (!isSameOrigin(request)) {
+      return correctionJson({ error: "IKAS_CORRECTION_ORIGIN_INVALID" }, 403);
+    }
+
     const installation = readInstallationSession(await getSession());
     if (!installation) return correctionJson({ error: "IKAS_LIVE_AUTH_REQUIRED" }, 401);
 

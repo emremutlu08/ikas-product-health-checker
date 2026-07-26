@@ -4,6 +4,7 @@ import { IkasAuthenticationError } from "@/lib/ikas/errors";
 import { tokenMatchesInstallation, type InstallationIdentity } from "@/lib/ikas/installation-auth";
 import { HttpIkasProductAdapter } from "@/lib/ikas/product-adapter";
 import { HttpIkasProductWriter, type IkasProductWriter } from "@/lib/ikas/product-writer";
+import { sharedIkasRequestLimiter } from "@/lib/ikas/request-limiter";
 import { getIkasToken } from "@/lib/ikas/token-store";
 import type { IkasProduct } from "@/lib/ikas/types";
 import { getLatestProductHealthReport } from "@/lib/ikas/report-service";
@@ -58,7 +59,12 @@ export async function createCorrectionRuntime(
   const adapter = new HttpIkasProductAdapter(config.graphApiUrl, accessToken, 1);
   return {
     readProduct: (productId) => adapter.getProductById(productId),
-    writer: new HttpIkasProductWriter(config.graphApiUrl, accessToken),
+    writer: new HttpIkasProductWriter(
+      config.graphApiUrl,
+      accessToken,
+      // ikas rate-limits and blocks per store, so the budget and the circuit are per installation.
+      sharedIkasRequestLimiter(installation.authorizedAppId),
+    ),
   };
 }
 
@@ -77,4 +83,9 @@ export async function createCorrectionReadRuntime(installation: InstallationIden
 
 export function hasCorrectionWriteFeature(installation: InstallationIdentity) {
   return isInstallationFeatureEnabled(installation, "product-corrections-write");
+}
+
+/** Bulk names its own capability, so the grant the plan surface advertises is the one enforced. */
+export function hasBulkWriteFeature(installation: InstallationIdentity) {
+  return isInstallationFeatureEnabled(installation, "bulk-corrections-write");
 }

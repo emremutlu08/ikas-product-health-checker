@@ -33,7 +33,7 @@ export type MutationExecutionErrorCode =
   | MutationRejectReason
   | MutationUnknownReason
   | "rate_limited"
-  | "store_unavailable";
+  | "origin_not_allowed";
 
 export class MutationExecutionError extends Error {
   constructor(readonly code: MutationExecutionErrorCode) {
@@ -57,6 +57,12 @@ export type MutationExecutionDependencies = {
   readProduct(productId: string): Promise<IkasProduct | undefined>;
   writer: IkasProductWriter;
   now(): number;
+  /**
+   * Which operations this caller may execute. The single-correction route refuses a bulk item, so
+   * a planned batch cannot be driven one row at a time past the separate bulk kill switch — or
+   * after the batch it belongs to has been cancelled.
+   */
+  acceptsOrigin?(origin: MutationOperationPayload["origin"]): boolean;
 };
 
 export function targetPathOf(payload: MutationOperationPayload): MutationTargetPath {
@@ -275,6 +281,14 @@ export async function executeConfirmedMutation(
     throw new MutationExecutionError("feature_required");
   }
 
+  if (dependencies.acceptsOrigin) {
+    // Checked before the claim, so refusing here does not consume the merchant's confirmation.
+    const existing = await dependencies.operationStore.get(installation, operationId);
+    if (existing && !dependencies.acceptsOrigin(existing.payload.origin)) {
+      throw new MutationExecutionError("origin_not_allowed");
+    }
+  }
+
   const claim = await dependencies.operationStore.claim(installation, operationId, dependencies.now());
   if (claim.outcome !== "claimed") {
     throw new MutationExecutionError(
@@ -391,8 +405,15 @@ async function finish(
   };
 }
 
-/** An `executing` record older than this is assumed to have lost its request and is reconciled. */
-export const RECONCILE_MIN_AGE_MS = 60_000;
+/**
+ * An `executing` record older than this is assumed to have lost its request.
+ *
+ * The floor has to clear the slowest legitimate path from claim to settlement, not merely feel
+ * long: a `429` can pause the limiter for a minute before the write is even sent, the write itself
+ * has a 20s timeout, and the read-back after it has its own. Reconciling sooner would let a status
+ * poll read the catalog before a still-in-flight write lands and settle it as "nothing changed".
+ */
+export const RECONCILE_MIN_AGE_MS = 5 * 60_000;
 
 export type ReconciliationResult =
   | { status: "settled"; outcome: MutationSettlement["status"] }

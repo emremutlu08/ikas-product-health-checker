@@ -157,7 +157,8 @@ export function parseAlertStateRecord(raw: unknown): AlertStateRecord {
     throw new AlertStoreError("corrupt_record");
   }
 
-  const state: AlertStateMap = {};
+  // Null-prototype, so a stored key such as `__proto__` adds an entry rather than reparenting it.
+  const state: AlertStateMap = Object.create(null) as AlertStateMap;
   for (const [key, entry] of Object.entries(record.state as Record<string, unknown>)) {
     const parsed = parseEntry(entry);
     if (!parsed) throw new AlertStoreError("corrupt_record");

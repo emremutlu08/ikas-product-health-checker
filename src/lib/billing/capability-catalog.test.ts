@@ -101,8 +101,21 @@ describe("resolveCapabilityMatrix", () => {
     ).toBe("available");
   });
 
-  it("marks low-stock alerts as beta rather than fully available", () => {
-    expect(capability(signals({ schedulerEnabled: true }), "low-stock-alerts").rollout).toBe("beta");
+  it("holds low-stock alerts closed until they could actually be delivered", () => {
+    // They share the daily summary's transport, so the scheduler alone is not enough.
+    expect(capability(signals({ schedulerEnabled: true }), "low-stock-alerts").rollout).toBe(
+      "needs_configuration",
+    );
+    expect(
+      capability(
+        signals({
+          schedulerEnabled: true,
+          emailDeliveryConfigured: true,
+          verifiedRecipientConfigured: true,
+        }),
+        "low-stock-alerts",
+      ).rollout,
+    ).toBe("beta");
   });
 
   it("withholds every paid row from a Free merchant and labels it as a PRO capability", () => {

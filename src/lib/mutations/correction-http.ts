@@ -7,6 +7,8 @@ import { readInstallationSession, getSession } from "@/lib/session";
 import type { InstallationIdentity } from "@/lib/ikas/installation-auth";
 import { CorrectionPreviewError, type CorrectionRequest } from "./mutation-preview";
 import { MutationOperationStoreError } from "./mutation-operation-store";
+import { BulkBatchStoreError } from "./bulk-batch-store";
+import { AlertStoreError } from "@/lib/alerts/alert-store";
 import { MutationExecutionError } from "./product-mutation-service";
 import { UndoPreparationError } from "./mutation-undo";
 
@@ -20,6 +22,8 @@ import { UndoPreparationError } from "./mutation-undo";
  */
 
 export const MAX_CORRECTION_BODY_BYTES = 2_048;
+/** A bulk plan carries up to `MAX_BULK_ITEMS` targets, so it needs its own, larger ceiling. */
+export const MAX_BULK_BODY_BYTES = 16_384;
 export const CORRECTION_PRIVATE_HEADERS = { "cache-control": "private, no-store" } as const;
 
 const identifier = z.string().min(1).max(256).regex(/^[A-Za-z0-9._:-]+$/);
@@ -60,6 +64,15 @@ function isJsonContentType(request: Request) {
   return Boolean(header && header.split(";")[0]!.trim().toLowerCase() === "application/json");
 }
 
+/** Rejects a request that did not come from this app's own origin. */
+export function isSameOrigin(request: Request): boolean {
+  try {
+    return request.headers.get("origin") === getCanonicalAppOrigin();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Same-origin, small, strictly-shaped, and tenant-bound — in that order, so an unauthenticated
  * caller learns nothing about the schema and an oversized body is never buffered into a parser.
@@ -67,6 +80,7 @@ function isJsonContentType(request: Request) {
 export async function guardCorrectionRequest<T extends z.ZodType>(
   request: Request,
   schema: T,
+  maxBodyBytes: number = MAX_CORRECTION_BODY_BYTES,
 ): Promise<RequestGuardFailure | RequestGuardSuccess<z.infer<T>>> {
   let canonicalOrigin: string;
   try {
@@ -90,7 +104,7 @@ export async function guardCorrectionRequest<T extends z.ZodType>(
   // Refused on the declared length first, so an oversized body is rejected before it is buffered
   // rather than after. The measured check below still runs, because a client controls the header.
   const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_CORRECTION_BODY_BYTES) {
+  if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
     return { response: correctionJson({ error: "IKAS_CORRECTION_INVALID_REQUEST" }, 413) };
   }
 
@@ -100,7 +114,7 @@ export async function guardCorrectionRequest<T extends z.ZodType>(
   } catch {
     return { response: correctionJson({ error: "IKAS_CORRECTION_INVALID_REQUEST" }, 400) };
   }
-  if (Buffer.byteLength(raw, "utf8") > MAX_CORRECTION_BODY_BYTES) {
+  if (Buffer.byteLength(raw, "utf8") > maxBodyBytes) {
     return { response: correctionJson({ error: "IKAS_CORRECTION_INVALID_REQUEST" }, 413) };
   }
 
@@ -159,7 +173,7 @@ const EXECUTION_STATUS: Record<MutationExecutionError["code"], number> = {
   verification_failed: 409,
   invariant_violation: 409,
   rate_limited: 429,
-  store_unavailable: 503,
+  origin_not_allowed: 409,
 };
 
 const UNDO_STATUS: Record<UndoPreparationError["code"], number> = {
@@ -190,7 +204,12 @@ export function describeCorrectionFailure(error: unknown): { status: number; cod
   if (error instanceof IkasAuthenticationError) {
     return { status: 401, code: "IKAS_LIVE_AUTH_REQUIRED" };
   }
-  if (error instanceof MutationOperationStoreError || error instanceof TokenStoreError) {
+  if (
+    error instanceof MutationOperationStoreError ||
+    error instanceof BulkBatchStoreError ||
+    error instanceof AlertStoreError ||
+    error instanceof TokenStoreError
+  ) {
     return { status: 503, code: "IKAS_CORRECTION_BACKEND_UNAVAILABLE" };
   }
   if (error instanceof IkasUpstreamError) {

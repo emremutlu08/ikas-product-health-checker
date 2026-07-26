@@ -63,7 +63,8 @@ export const CORRECTION_ERROR_MESSAGES: Record<string, string> = {
     "Bu alan önizlemeden sonra başka bir yerde değişti. Hiçbir şey yazılmadı; yeniden önizleyin.",
   IKAS_CORRECTION_WRITE_REJECTED: "ikas bu değişikliği kabul etmedi. Kataloğunuzda değişiklik olmadı.",
   IKAS_CORRECTION_PREFLIGHT_FAILED: "ikas'a şu anda ulaşılamıyor. Hiçbir şey yazılmadı.",
-  IKAS_CORRECTION_RATE_LIMITED: "ikas hız sınırına ulaşıldı. Kısa bir süre sonra yeniden deneyin.",
+  IKAS_CORRECTION_RATE_LIMITED:
+    "ikas hız sınırına ulaşıldı; hiçbir şey yazılmadı. Kısa bir süre sonra yeni bir önizleme oluşturun.",
   IKAS_CORRECTION_MUTATION_OUTCOME_UNKNOWN:
     "İşlemin sonucu doğrulanamadı. Ürününüzü kontrol edin; aynı işlemi tekrar çalıştırmayın.",
   IKAS_CORRECTION_VERIFICATION_FAILED:
@@ -78,6 +79,8 @@ export const CORRECTION_ERROR_MESSAGES: Record<string, string> = {
   IKAS_CORRECTION_BACKEND_UNAVAILABLE: "Güvenli işlem deposuna şu anda erişilemiyor. Sonra deneyin.",
   IKAS_CORRECTION_UPSTREAM_UNAVAILABLE: "ikas'a şu anda ulaşılamıyor. Sonra deneyin.",
   IKAS_CORRECTION_UNAVAILABLE: "Düzeltme yüzeyi şu anda kullanılamıyor.",
+  IKAS_CORRECTION_ORIGIN_NOT_ALLOWED:
+    "Bu düzeltme bir toplu işleme ait; tek tek değil, toplu işlem ekranından çalıştırılır.",
   IKAS_CORRECTION_FAILED: "İşlem tamamlanamadı.",
 };
 

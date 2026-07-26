@@ -322,12 +322,14 @@ describe("executeBulkCorrection", () => {
     const { fixture, plan } = await planned(20);
     const execution = executionDependencies(fixture);
     const realGet = fixture.batchStore.get.bind(fixture.batchStore);
-    let statusReads = 0;
+    const realSetStatus = fixture.batchStore.setStatus.bind(fixture.batchStore);
+
+    // Cancel only once real work has happened, so this exercises a mid-run stop rather than a
+    // batch that was already cancelled before the first chunk.
     fixture.batchStore.get = (async (tenant, id) => {
       const record = await realGet(tenant, id);
-      // The merchant cancels while the first chunk is running.
-      if (record && record.status === "running" && ++statusReads >= 1) {
-        await cancelBulkCorrection(TEST_TENANT, plan.batchId, { batchStore: { get: realGet, setStatus: fixture.batchStore.setStatus.bind(fixture.batchStore) } });
+      if (record?.status === "running" && execution.writer.writeVariantSkus.mock.calls.length > 0) {
+        await realSetStatus(tenant, id, "cancelled");
         return { ...record, status: "cancelled" as const };
       }
       return record;
@@ -341,8 +343,19 @@ describe("executeBulkCorrection", () => {
     );
 
     expect(result.status).toBe("cancelled");
-    // Whatever had already started still settled; nothing new was begun.
+    // Some items ran and settled; the rest were never started.
+    expect(execution.writer.writeVariantSkus.mock.calls.length).toBeGreaterThan(0);
     expect(execution.writer.writeVariantSkus.mock.calls.length).toBeLessThan(20);
+  });
+
+  it("keeps every item's confirmation alive for longer than the batch confirmation window", async () => {
+    const { fixture, plan } = await planned(1);
+    const item = plan.items[0]!;
+    const operation = await fixture.operationStore.get(TEST_TENANT, item.operationId!);
+
+    const itemWindow = operation!.payload.expiresAt - operation!.payload.createdAt;
+    // Otherwise a merchant could confirm a batch whose items had all already expired.
+    expect(itemWindow).toBeGreaterThan(plan.expiresAt - NOW);
   });
 
   it("stops the batch after repeated unknown outcomes instead of burning the error budget", async () => {

@@ -141,6 +141,78 @@ describe("product invariants", () => {
     expect(diffProductInvariants(before, after, skuTarget)).toEqual([]);
   });
 
+  it("does not mistake a reordered duplicate stock row for a change", () => {
+    const stockTarget = {
+      kind: "stock_change",
+      variantId: "variant-1",
+      stockLocationId: "location-1",
+    } as const;
+    const live = {
+      id: "stock-live",
+      productId: "product-1",
+      variantId: "variant-1",
+      stockLocationId: "location-1",
+      stockCount: 7,
+      deleted: false,
+    };
+    const removed = { ...live, id: "stock-removed", stockCount: 0, deleted: true };
+
+    const before = captureProductInvariants(
+      buildProduct({ variants: [buildVariant({ stocks: [removed, live] })] }),
+    );
+    const after = captureProductInvariants(
+      buildProduct({ variants: [buildVariant({ stocks: [live, removed] })] }),
+    );
+
+    expect(diffProductInvariants(before, after, stockTarget)).toEqual([]);
+  });
+
+  it("still sees a duplicate row that the write silently clobbered", () => {
+    const priceTarget = { kind: "price_change", variantId: "variant-1", priceListId: null } as const;
+    const first = { sellPrice: 199.9, buyPrice: 120, currencyCode: "TRY", priceListId: null };
+    const second = { sellPrice: 249.9, buyPrice: 130, currencyCode: "TRY", priceListId: null };
+
+    const before = captureProductInvariants(
+      buildProduct({ variants: [buildVariant({ prices: [first, second] })] }),
+    );
+    const after = captureProductInvariants(
+      buildProduct({ variants: [buildVariant({ prices: [first, { ...second, buyPrice: 0 }] })] }),
+    );
+
+    // The second row is addressed separately, so its loss is not hidden behind the target path.
+    expect(diffProductInvariants(before, after, priceTarget)).toEqual([
+      "variant[variant-1].price[default#2].buyPrice",
+    ]);
+  });
+
+  it("catches a currency the price write could not resubmit", () => {
+    const priceTarget = { kind: "price_change", variantId: "variant-1", priceListId: null } as const;
+    const before = captureProductInvariants(buildProduct());
+    const after = captureProductInvariants(
+      buildProduct({
+        variants: [
+          buildVariant({
+            prices: [
+              {
+                sellPrice: 149.9,
+                buyPrice: 120,
+                discountPrice: 249.9,
+                currencyCode: null,
+                currencySymbol: null,
+                priceListId: null,
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+
+    expect(diffProductInvariants(before, after, priceTarget)).toEqual([
+      "variant[variant-1].price[default].currencyCode",
+      "variant[variant-1].price[default].currencySymbol",
+    ]);
+  });
+
   it("treats a swapped product id as a total mismatch", () => {
     const before = captureProductInvariants(buildProduct());
     const after = captureProductInvariants(buildProduct({ id: "product-2" }));
