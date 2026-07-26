@@ -4,7 +4,7 @@ import { config } from "@/globals/config";
 import { getIkasToken, invalidateIkasToken } from "./token-store";
 import { HttpIkasProductAdapter, type IkasProductAdapter } from "./product-adapter";
 import { IkasAuthenticationError } from "./errors";
-import type { HealthReport } from "./types";
+import type { HealthReport, IkasProduct } from "./types";
 import { tokenMatchesInstallation, type InstallationIdentity } from "./installation-auth";
 import { getLatestSnapshot, isSnapshotStale, type ScanSnapshot } from "@/lib/scans/snapshot-store";
 
@@ -66,6 +66,11 @@ async function requireTenantToken(
 export type CollectProductHealthReportOptions = {
   /** Active-Pro configured low-stock threshold. 0 (the default) disables low-stock warnings. */
   lowStockThreshold?: number;
+  /**
+   * Side-channel over the same catalog read. Low-stock alerting needs per-location stock, which
+   * the aggregated report does not carry; observing here avoids paying for a second scan.
+   */
+  observe?(products: IkasProduct[]): void;
 };
 
 /** Live ikas catalog read. Only an explicit scan may call this. */
@@ -80,6 +85,7 @@ export async function collectProductHealthReport(
   const adapter = dependencies.createAdapter(config.graphApiUrl, storedToken.accessToken);
   try {
     const { products } = await adapter.listProducts();
+    options.observe?.(products);
     return buildHealthReport(products, now, {
       merchantId: storedToken.merchantId,
       lowStockThreshold: options.lowStockThreshold,

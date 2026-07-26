@@ -227,6 +227,7 @@ export default async function SettingsPage({
             <Link className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/">Ürün Sağlığı</Link>
             <Link className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/history">Geçmiş</Link>
             <Link aria-current="page" className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/settings">Ayarlar</Link>
+            <Link className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/plan">Plan</Link>
           </nav>
         </header>
 

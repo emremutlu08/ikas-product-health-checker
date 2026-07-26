@@ -2,10 +2,9 @@
  * Dashboard header: who this is, what it last did, and the one operation that costs anything.
  *
  * Everything shown here comes from data the server already trusts — the sealed installation
- * session and the stored snapshot. Plan state is deliberately absent: the dashboard read path
- * resolves no entitlement, so any tier shown here would be a guess about the merchant's
- * billing state, and a plan-management link would have to be invented. That belongs with the
- * entitlement wiring, not here.
+ * session and the stored snapshot. The header still resolves no entitlement — a tier rendered
+ * here would be a guess about the merchant's billing state — so it links to the plan surface,
+ * which resolves the licence once and answers the question properly.
  */
 
 const SCAN_ENDPOINT = "/api/scans";
@@ -81,6 +80,18 @@ export function DashboardHeader({
             href="/settings"
           >
             Ayarlar
+          </a>
+          <a
+            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
+            href="/corrections"
+          >
+            Düzeltmeler
+          </a>
+          <a
+            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
+            href="/plan"
+          >
+            Plan
           </a>
         </nav>
         {csvHref ? (

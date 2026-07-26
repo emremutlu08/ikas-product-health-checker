@@ -3,6 +3,6 @@
     "default": 3100
   },
   "oauthRedirectPath": "/api/oauth/callback/ikas",
-  "runCommand": "npm run dev -- --port 3100",
+  "runCommand": "npm run dev -- --port 3100 --webpack",
   "actions": []
 }

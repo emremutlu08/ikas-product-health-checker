@@ -11,17 +11,22 @@ export type ProductAdapterResult = {
 
 export interface IkasProductAdapter {
   listProducts(): Promise<ProductAdapterResult>;
+  getProductById(productId: string): Promise<IkasProduct | undefined>;
 }
 
 export class MockIkasProductAdapter implements IkasProductAdapter {
   async listProducts(): Promise<ProductAdapterResult> {
     return { source: "mock", products: sampleProducts };
   }
+
+  async getProductById(productId: string): Promise<IkasProduct | undefined> {
+    return sampleProducts.find((product) => product.id === productId);
+  }
 }
 
 const LIST_PRODUCT_QUERY = /* GraphQL */ `
-  query listProduct($pagination: PaginationInput) {
-    listProduct(pagination: $pagination) {
+  query listProduct($pagination: PaginationInput, $id: StringFilterInput) {
+    listProduct(pagination: $pagination, id: $id) {
       count
       hasNext
       limit
@@ -125,6 +130,54 @@ export class HttpIkasProductAdapter implements IkasProductAdapter {
     this.maxProducts = assertScanBudget(maxProducts);
     this.maxDurationMs = assertScanBudget(maxDurationMs);
     this.now = now;
+  }
+
+  async getProductById(productId: string): Promise<IkasProduct | undefined> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(this.endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.token}`,
+        },
+        body: JSON.stringify({
+          query: LIST_PRODUCT_QUERY,
+          variables: { id: { eq: productId }, pagination: { page: 1, limit: 1 } },
+        }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch {
+      throw new IkasUpstreamError("IKAS_UPSTREAM_HTTP_ERROR");
+    }
+
+    if (response.status === 401) throw new IkasAuthenticationError("IKAS_AUTHENTICATION_FAILED");
+    if (!response.ok) throw new IkasUpstreamError("IKAS_UPSTREAM_HTTP_ERROR");
+
+    let payload: GraphQlResponse<ListProductResponse>;
+    try {
+      payload = (await response.json()) as GraphQlResponse<ListProductResponse>;
+    } catch {
+      throw new IkasUpstreamError("IKAS_UPSTREAM_INVALID_RESPONSE");
+    }
+    if (payload.errors?.length) {
+      const hasAuthenticationError = payload.errors.some((error) =>
+        error.extensions?.code ? AUTHENTICATION_GRAPHQL_CODES.has(error.extensions.code) : false,
+      );
+      if (hasAuthenticationError) throw new IkasAuthenticationError("IKAS_AUTHENTICATION_FAILED");
+      throw new IkasUpstreamError("IKAS_UPSTREAM_GRAPHQL_ERROR");
+    }
+
+    const page = payload.data?.listProduct;
+    if (!page) {
+      throw new IkasUpstreamError("IKAS_UPSTREAM_INVALID_RESPONSE");
+    }
+    const product = page.data[0];
+    if (product && product.id !== productId) {
+      throw new IkasUpstreamError("IKAS_UPSTREAM_INVALID_RESPONSE");
+    }
+    return product;
   }
 
   async listProducts(): Promise<ProductAdapterResult> {

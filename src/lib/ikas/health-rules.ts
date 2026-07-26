@@ -83,8 +83,23 @@ function activeVariants(product: IkasProduct) {
   return product.variants.filter((variant) => variant.isActive && !variant.deleted);
 }
 
-function variantLabel(variant: IkasProductVariant) {
-  return clean(variant.sku) || variant.id;
+/**
+ * What to call a variant on screen.
+ *
+ * A SKU is the merchant's own name for it, so it wins. Falling back to the raw variant id was
+ * actively unhelpful for the one case that matters most — a variant flagged for a *missing* SKU
+ * has no SKU by definition, so every such row was titled with a UUID. A single-variant product
+ * gets no label at all, because the product name already identifies it, and anything else gets a
+ * stable position instead.
+ */
+function variantLabel(product: IkasProduct, variant: IkasProductVariant) {
+  const sku = clean(variant.sku);
+  if (sku) return sku;
+
+  const siblings = activeVariants(product);
+  if (siblings.length <= 1) return undefined;
+  const position = siblings.findIndex((candidate) => candidate.id === variant.id);
+  return position >= 0 ? `Varyant ${position + 1}` : undefined;
 }
 
 function variantStock(variant: IkasProductVariant) {
@@ -131,7 +146,7 @@ function addIssue(
     productId: product.id,
     productName: product.name,
     variantId: variant?.id,
-    variantLabel: variant ? variantLabel(variant) : undefined,
+    variantLabel: variant ? variantLabel(product, variant) : undefined,
     message,
     value,
     productUpdatedAt: isoDate(variant?.updatedAt ?? product.updatedAt ?? product.createdAt),
