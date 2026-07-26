@@ -18,9 +18,9 @@ Türkçe kullanıcı metni üret. Kod, identifier ve commit/PR başlıklarında 
 
 ## Başlangıç durumu — bunu koru ve doğrula
 
-Çalışma ağacı kasıtlı olarak kirli ve devam eden çalışmayı içeriyor. **Reset, clean, checkout ile silme, stash-drop veya başka bir worktree'ye taşıma yapma.** İlk iş olarak `git status`, `git diff`, branch/base SHA ve tracking issue #16'yı tekrar doğrula. Mevcut uncommitted değişiklikleri kullanıcı/önceki agent çalışması olarak sahiplen, incele ve devam ettir.
+Çalışma ağacı temiz bir checkpoint olarak branch'e kaydedildi ve remote'a push edildi. Beklenen başlangıç checkpoint'i `f1e67ebe58b423c0fcb2611819378a15474695f5` commit'idir. İlk iş olarak `git status`, `git diff`, branch/base SHA, remote tracking ve tracking issue #16'yı tekrar doğrula. Worktree temizse bu checkpoint'ten devam et. Codex çalışmaya başladığında yeni uncommitted değişiklikler varsa bunları kullanıcı/önceki agent çalışması say; incelemeden reset, clean, checkout, stash-drop veya overwrite ile silme.
 
-Beklenen başlangıç alanları:
+Beklenen checkpoint alanları:
 
 - `docs/ikas-mutation-contract.md`
 - `docs/ikas-webhook-contract.md`
