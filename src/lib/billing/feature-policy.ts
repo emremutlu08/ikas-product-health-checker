@@ -6,12 +6,15 @@ import type { SemanticTier } from "./plan-catalog";
  */
 export const APP_FEATURES = [
   "manual-scan",
+  "health-dashboard",
   "csv-export",
   "scheduled-scan",
   "scan-history",
   "low-stock-threshold-config",
   "daily-email-summary",
+  "low-stock-alerts",
   "product-corrections-write",
+  "bulk-corrections-write",
 ] as const;
 
 export type AppFeature = (typeof APP_FEATURES)[number];
@@ -19,12 +22,15 @@ export type AppFeature = (typeof APP_FEATURES)[number];
 /** Minimum tier required per feature. Manual scan and CSV export stay Free, as shipped today. */
 const FEATURE_MINIMUM_TIER = new Map<AppFeature, SemanticTier>([
   ["manual-scan", "free"],
+  ["health-dashboard", "free"],
   ["csv-export", "free"],
   ["scheduled-scan", "pro"],
   ["scan-history", "pro"],
   ["low-stock-threshold-config", "pro"],
   ["daily-email-summary", "pro"],
+  ["low-stock-alerts", "pro"],
   ["product-corrections-write", "pro"],
+  ["bulk-corrections-write", "pro"],
 ]);
 
 const TIER_RANK = new Map<SemanticTier, number>([
@@ -44,6 +50,11 @@ export function isFeatureEnabled(feature: AppFeature, tier: SemanticTier): boole
   if (requiredRank === undefined) return false;
 
   return grantedRank >= requiredRank;
+}
+
+/** The single source for "which tier does this need", so no other module may restate it. */
+export function minimumTierFor(feature: AppFeature): SemanticTier | undefined {
+  return FEATURE_MINIMUM_TIER.get(feature);
 }
 
 export function listEnabledFeatures(tier: SemanticTier): AppFeature[] {

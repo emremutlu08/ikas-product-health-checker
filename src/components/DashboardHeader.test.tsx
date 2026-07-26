@@ -34,22 +34,23 @@ describe("product and store identity", () => {
 
 describe("plan state is only shown when it can be told truthfully", () => {
   /**
-   * There is no server-side entitlement resolution on the dashboard read path yet, so the
-   * header must not claim a plan. Guessing "Free" would be an unverified assertion about a
-   * merchant's billing state, and a plan-management link would have to be invented.
+   * The dashboard read path still resolves no entitlement, so the header still must not claim a
+   * tier — guessing "Free" would be an unverified assertion about a merchant's billing state.
+   * It may only point at `/plan`, which resolves the licence server-side and answers properly.
    */
   it("does not assert a plan tier", () => {
     const html = render(base);
 
-    for (const claim of ["Ücretsiz", "Free", "Pro", "Plan"]) {
+    for (const claim of ["Ücretsiz", "Free", "Pro"]) {
       expect(html).not.toContain(claim);
     }
   });
 
-  it("does not invent a plan-management destination", () => {
+  it("links to the plan surface and to no invented billing destination", () => {
     const html = render(base);
 
-    expect(html).not.toMatch(/href="[^"]*(plan|billing|subscription|upgrade)/i);
+    expect(html).toContain('href="/plan"');
+    expect(html).not.toMatch(/href="[^"]*(billing|subscription|upgrade|checkout)/i);
   });
 
   /**

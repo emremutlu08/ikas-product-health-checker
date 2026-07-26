@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { APP_FEATURES, isFeatureEnabled, listEnabledFeatures, type AppFeature } from "./feature-policy";
 
-const FREE_FEATURES: AppFeature[] = ["manual-scan", "csv-export"];
+const FREE_FEATURES: AppFeature[] = ["manual-scan", "health-dashboard", "csv-export"];
 const PRO_ONLY_FEATURES: AppFeature[] = [
   "scheduled-scan",
   "scan-history",
   "low-stock-threshold-config",
   "daily-email-summary",
+  "low-stock-alerts",
   "product-corrections-write",
+  "bulk-corrections-write",
 ];
 
 describe("feature policy", () => {

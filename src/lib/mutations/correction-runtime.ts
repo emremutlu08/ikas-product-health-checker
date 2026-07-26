@@ -28,6 +28,16 @@ export function productWritesEnabled(env: NodeJS.ProcessEnv = process.env): bool
   return env[PRODUCT_WRITE_KILL_SWITCH_ENV]?.trim() === "true";
 }
 
+export const BULK_WRITE_KILL_SWITCH_ENV = "IKAS_PRODUCT_BULK_WRITES_ENABLED";
+
+/**
+ * Bulk has its own switch and additionally requires the single-write switch: proving one confirmed
+ * correction is safe is a precondition for running many, never a substitute for it.
+ */
+export function bulkWritesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return productWritesEnabled(env) && env[BULK_WRITE_KILL_SWITCH_ENV]?.trim() === "true";
+}
+
 export type CorrectionRuntime = {
   readProduct(productId: string): Promise<IkasProduct | undefined>;
   writer: IkasProductWriter;
