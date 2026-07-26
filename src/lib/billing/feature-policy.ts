@@ -11,6 +11,7 @@ export const APP_FEATURES = [
   "scan-history",
   "low-stock-threshold-config",
   "daily-email-summary",
+  "product-corrections-write",
 ] as const;
 
 export type AppFeature = (typeof APP_FEATURES)[number];
@@ -23,6 +24,7 @@ const FEATURE_MINIMUM_TIER = new Map<AppFeature, SemanticTier>([
   ["scan-history", "pro"],
   ["low-stock-threshold-config", "pro"],
   ["daily-email-summary", "pro"],
+  ["product-corrections-write", "pro"],
 ]);
 
 const TIER_RANK = new Map<SemanticTier, number>([

@@ -7,6 +7,7 @@ const PRO_ONLY_FEATURES: AppFeature[] = [
   "scan-history",
   "low-stock-threshold-config",
   "daily-email-summary",
+  "product-corrections-write",
 ];
 
 describe("feature policy", () => {

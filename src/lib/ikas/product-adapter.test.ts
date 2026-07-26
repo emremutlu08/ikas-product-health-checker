@@ -41,6 +41,60 @@ const secondPage = {
 };
 
 describe("HttpIkasProductAdapter", () => {
+  it("reads one exact product by id for a fresh mutation baseline", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            listProduct: {
+              data: [firstPage.data.listProduct.data[0]],
+              hasNext: false,
+              page: 1,
+              limit: 1,
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const product = await new HttpIkasProductAdapter(
+      "https://example.test/graphql",
+      "token",
+      200,
+      fetchMock,
+    ).getProductById("p1");
+
+    expect(product?.id).toBe("p1");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const init = fetchMock.mock.calls[0]?.[1];
+    const body = JSON.parse(String(init?.body));
+    expect(body.variables).toEqual({ id: { eq: "p1" }, pagination: { page: 1, limit: 1 } });
+    expect(init?.cache).toBe("no-store");
+  });
+
+  it("rejects a product result that does not match the exact requested id", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            listProduct: {
+              data: [{ ...firstPage.data.listProduct.data[0], id: "wrong-product" }],
+              hasNext: false,
+              page: 1,
+              limit: 1,
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      new HttpIkasProductAdapter("https://example.test/graphql", "token", 200, fetchMock).getProductById("p1"),
+    ).rejects.toMatchObject({ code: "IKAS_UPSTREAM_INVALID_RESPONSE" });
+  });
+
   it("fetches every paginated listProduct page", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

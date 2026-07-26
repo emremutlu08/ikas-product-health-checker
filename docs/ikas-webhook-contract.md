@@ -1,11 +1,11 @@
 # ikas webhook contract
 
-Status: **BLOCKED — documentation only.**
+Status: **SDK VERIFICATION BOUNDARY CONFIRMED; live delivery acceptance remains open.**
 
-This file records what the official ikas documentation states about app webhooks, and
-separates it from what is still unverified. No webhook route may be implemented until
-every item in the [Open questions](#open-questions--blockers) section has a written
-first-party answer.
+This file records what the official ikas documentation and installed first-party SDK state
+about app webhooks, and separates that evidence from delivery behaviour that is still
+unverified. A route must use the SDK verification/parsing functions; it must never implement
+the undisclosed signature algorithm or canonicalization itself.
 
 The internal, store-agnostic tenant cleanup foundation now exists. It is intentionally
 unwired: no webhook/API route or signature module calls it.
@@ -20,6 +20,24 @@ These come directly from the supplied official ikas documentation.
 |---|---|
 | Plan purchase / payment | `store/app/payment` |
 | App deletion (uninstall) | `store/app/deleted` |
+| Stock record created | `store/stock/created` |
+| Stock record updated | `store/stock/updated` |
+
+### Official verification boundary
+
+The current first-party guide documents:
+
+- `validateIkasWebhookSignature(webhookData, CLIENT_SECRET)`
+- `getParsedIkasWebhookData(webhookData, CLIENT_SECRET)`
+
+The secret source is the app `CLIENT_SECRET`. The installed `@ikas/admin-api-client` `2.1.0`
+package exports both functions. The cryptographic algorithm and canonical bytes remain SDK
+internals and must not be copied or guessed in this application.
+
+Sources:
+
+- https://builders.ikas.com/docs/app-development/ikas-sdk/webhooks
+- https://builders.ikas.com/docs/admin-api/admin-apis/webhook/save-webhook
 
 ### Payload fields
 
@@ -30,6 +48,13 @@ The webhook payload contains:
 - `merchantId`
 - `id`
 - `createdAt`
+- `scope`
+
+The SDK models `data` as a JSON string. `getParsedIkasWebhookData` is the required parser after
+signature validation.
+
+For stock scopes, the SDK's `IWebhookStock` extends `ProductStockLocation` with `id`, `productId`,
+`variantId`, `stockLocationId`, `stockCount`, `deleted`, and optional `createdAt`/`updatedAt`.
 
 ### Payment processing rule
 
@@ -47,39 +72,37 @@ Plan purchase can be tested on development stores.
 
 ## Open questions — blockers
 
-Each of the following is **UNKNOWN** and must be confirmed in writing by ikas before any
-signature verification or webhook handler is written.
+The application must handle the following as unknown delivery behaviour and prove the route
+with a captured development-store delivery before production enablement.
 
-1. **UNKNOWN / BLOCKER — signature algorithm and canonicalization.** The exact algorithm
-   used to produce `signature`, and the exact byte sequence it is computed over, are not
-   documented in the supplied material. The presence of a `signature` field is not
-   itself a verification scheme.
-2. **UNKNOWN / BLOCKER — secret source.** Which secret is used to compute and verify the
-   signature, and where it is obtained from, is not documented.
-3. **UNKNOWN / BLOCKER — replay window.** Whether a timestamp/replay tolerance exists,
+1. **UNKNOWN — replay window.** Whether a timestamp/replay tolerance exists,
    and what window is expected, is not documented. `createdAt` is present in the payload
    but its role in replay protection is unconfirmed.
-4. **UNKNOWN / BLOCKER — retry policy.** Delivery retry behaviour, retry counts, backoff,
+2. **UNKNOWN — retry policy.** Delivery retry behaviour, retry counts, backoff,
    and the idempotency guarantees expected of the receiver are not documented.
-5. **UNKNOWN / BLOCKER — deletion payload canonicalization.** For `store/app/deleted`,
-   whether the `data` field being a JSON string (rather than a JSON object) changes the
-   canonicalization used for signature computation is not documented. This directly
-   affects whether one verification routine can serve both scopes.
+3. **UNKNOWN — ordering and duplication.** No ordering guarantee, event-retention contract,
+   or duplicate-delivery window has been located.
+4. **UNKNOWN — registration replacement semantics.** Whether repeated `saveWebhooks` calls
+   merge or replace existing registrations requires a development-store test.
 
 ## Consequences for implementation
 
-- Do not add `src/app/api/webhooks/ikas/route.ts` or any signature verification module
-  while the items above are UNKNOWN.
+- Use only `validateIkasWebhookSignature` and `getParsedIkasWebhookData` from the first-party SDK.
+- Never build a custom HMAC/hash/canonicalization implementation.
+- Parse the SDK output through a strict scope-specific schema before any side effect.
+- Treat `id` as the candidate idempotency key and persist it before applying an event; verify its
+  stability with captured duplicate/retry deliveries.
+- Return success only after the idempotency record and resulting state transition are durable.
 - Do not treat a `store/app/payment` event as granting entitlement. Entitlement must be
   resolved server-side from `getMerchantLicence`.
-- Do not count the existence of the `signature` field as verification.
+- Do not count the existence of the `signature` field as verification; require SDK validation.
 
 ## Uninstall cleanup foundation
 
 `src/lib/lifecycle/tenant-cleanup-service.ts` accepts only the validated canonical tenant
-identity (`authorizedAppId` and `merchantId`). A future authenticated caller can invoke
-the service after the first-party signature, canonical-byte, secret-source, replay, and
-retry contracts are known.
+identity (`authorizedAppId` and `merchantId`). A future SDK-authenticated caller can invoke
+the service after strict payload validation and durable event idempotency. Replay/retry behaviour
+must still be exercised in development-store acceptance.
 
 Cleanup is deterministic and best-effort in this order:
 
