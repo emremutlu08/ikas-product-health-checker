@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { z } from "zod";
 import { getCanonicalAppOrigin } from "@/helpers/api-helpers";
 import { IkasAuthenticationError, IkasUpstreamError } from "@/lib/ikas/errors";
@@ -86,13 +87,20 @@ export async function guardCorrectionRequest<T extends z.ZodType>(
     return { response: correctionJson({ error: "IKAS_CORRECTION_INVALID_REQUEST" }, 415) };
   }
 
+  // Refused on the declared length first, so an oversized body is rejected before it is buffered
+  // rather than after. The measured check below still runs, because a client controls the header.
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_CORRECTION_BODY_BYTES) {
+    return { response: correctionJson({ error: "IKAS_CORRECTION_INVALID_REQUEST" }, 413) };
+  }
+
   let raw: string;
   try {
     raw = await request.text();
   } catch {
     return { response: correctionJson({ error: "IKAS_CORRECTION_INVALID_REQUEST" }, 400) };
   }
-  if (raw.length > MAX_CORRECTION_BODY_BYTES) {
+  if (Buffer.byteLength(raw, "utf8") > MAX_CORRECTION_BODY_BYTES) {
     return { response: correctionJson({ error: "IKAS_CORRECTION_INVALID_REQUEST" }, 413) };
   }
 

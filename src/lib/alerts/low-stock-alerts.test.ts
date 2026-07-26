@@ -135,6 +135,38 @@ describe("evaluateLowStockAlerts", () => {
     expect(outside.events).toEqual([expect.objectContaining({ kind: "crossing" })]);
   });
 
+  it("still reports a crossing the cooldown suppressed, once the window closes", () => {
+    const recentlyRecovered: AlertStateMap = {
+      [key]: {
+        side: "above",
+        firstSeen: NOW - 10_000,
+        lastSeen: NOW - 10_000,
+        lastNotifiedAt: NOW - 1_000,
+        lastNotifiedSide: "above",
+      },
+    };
+
+    const suppressed = evaluate([observation()], recentlyRecovered, { scanId: "scan-3" });
+    expect(suppressed.events).toEqual([]);
+    expect(suppressed.nextState[key]).toMatchObject({ side: "below", lastNotifiedSide: "above" });
+
+    // The variant never came back up, so without this the merchant would never hear about it.
+    const afterCooldown = evaluate([observation()], suppressed.nextState, {
+      now: NOW + DEFAULT_ALERT_COOLDOWN_MS,
+      scanId: "scan-4",
+    });
+    expect(afterCooldown.events).toEqual([expect.objectContaining({ kind: "crossing" })]);
+    expect(afterCooldown.nextState[key]).toMatchObject({ lastNotifiedSide: "below" });
+
+    // And still only once.
+    expect(
+      evaluate([observation()], afterCooldown.nextState, {
+        now: NOW + DEFAULT_ALERT_COOLDOWN_MS * 3,
+        scanId: "scan-5",
+      }).events,
+    ).toEqual([]);
+  });
+
   it("counts zero stock as below the threshold", () => {
     expect(evaluate([observation({ stockCount: 0 })]).events).toHaveLength(1);
   });

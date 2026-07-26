@@ -121,7 +121,12 @@ export function evaluateLowStockAlerts({
     if (below) {
       const alreadyBelow = previous?.side === "below";
       const suppressed = withinCooldown(previous, now, cooldownMs);
-      const notify = !alreadyBelow && !suppressed;
+      /**
+       * The test is "have we already told them about *this* dip", not "is it still below". A
+       * crossing the cooldown suppressed therefore stays pending and is reported once the window
+       * closes, rather than being swallowed because the variant never came back up in between.
+       */
+      const notify = !suppressed && previous?.lastNotifiedSide !== "below";
       if (notify) events.push(eventFor("crossing", observation, threshold));
 
       nextState[key] = {

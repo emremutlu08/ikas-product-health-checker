@@ -155,6 +155,24 @@ describe("POST /api/product-corrections/preview", () => {
     expect(mocks.prepareCorrection).toHaveBeenCalledWith(installation, skuBody, expect.anything());
   });
 
+  it("refuses an oversized body on its declared length, before buffering it", async () => {
+    const request = new Request(`${ORIGIN}/api/product-corrections/preview`, {
+      method: "POST",
+      headers: {
+        origin: ORIGIN,
+        "content-type": "application/json",
+        "content-length": String(10 * 1024 * 1024),
+      },
+      body: JSON.stringify(skuBody),
+    });
+    const read = vi.spyOn(request, "text");
+
+    const response = await previewRoute(request);
+
+    expect(response.status).toBe(413);
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("rejects a non-JSON content type and an oversized body", async () => {
     expect(
       (
