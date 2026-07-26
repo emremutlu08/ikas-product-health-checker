@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildHealthReport } from "./health-rules";
 import { issuesToCsv } from "./csv";
 import { sampleProducts } from "./sample-products";
+import { buildProduct, buildVariant } from "@/lib/mutations/mutation-fixtures";
 
 const report = buildHealthReport(sampleProducts, new Date("2026-07-06T00:00:00.000Z"));
 
@@ -79,6 +80,47 @@ describe("buildHealthReport", () => {
     expect(report.ruleSummaries.find((rule) => rule.code === "out_of_stock")?.count).toBe(1);
     expect(report.ruleSummaries.find((rule) => rule.code === "same_sku")?.count).toBe(2);
     expect(report.productRows.some((row) => row.productName === "Silver Ring" && row.mistakes.includes("Hatalı Fiyat"))).toBe(true);
+  });
+});
+
+describe("variant labels", () => {
+  it("names a variant by its SKU when it has one", () => {
+    const report = buildHealthReport([
+      buildProduct({
+        variants: [buildVariant({ id: "v1", sku: "AAA" }), buildVariant({ id: "v2", sku: "BBB" })],
+      }),
+    ]);
+
+    const labels = report.issues.filter((issue) => issue.variantId).map((issue) => issue.variantLabel);
+    expect(labels).toContain("AAA");
+    expect(labels).toContain("BBB");
+  });
+
+  it("never falls back to a raw variant id for a variant with no SKU", () => {
+    const report = buildHealthReport([
+      buildProduct({
+        variants: [
+          buildVariant({ id: "0f0b2b0e-1111-2222-3333-444455556666", sku: null }),
+          buildVariant({ id: "0f0b2b0e-7777-8888-9999-aaaabbbbcccc", sku: null }),
+        ],
+      }),
+    ]);
+
+    const missingSku = report.issues.filter((issue) => issue.code === "missing_sku");
+    expect(missingSku).toHaveLength(2);
+    expect(missingSku.map((issue) => issue.variantLabel)).toEqual(["Varyant 1", "Varyant 2"]);
+    for (const issue of missingSku) {
+      expect(issue.variantLabel).not.toBe(issue.variantId);
+    }
+  });
+
+  it("leaves a single-variant product unlabelled, because its name already says which it is", () => {
+    const report = buildHealthReport([
+      buildProduct({ variants: [buildVariant({ id: "only-variant", sku: null })] }),
+    ]);
+
+    const missingSku = report.issues.find((issue) => issue.code === "missing_sku");
+    expect(missingSku?.variantLabel).toBeUndefined();
   });
 });
 
