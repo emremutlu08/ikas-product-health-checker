@@ -18,7 +18,7 @@ Türkçe kullanıcı metni üret. Kod, identifier ve commit/PR başlıklarında 
 
 ## Başlangıç durumu — bunu koru ve doğrula
 
-Çalışma ağacı temiz bir checkpoint olarak branch'e kaydedildi ve remote'a push edildi. Beklenen başlangıç checkpoint'i `f1e67ebe58b423c0fcb2611819378a15474695f5` commit'idir. İlk iş olarak `git status`, `git diff`, branch/base SHA, remote tracking ve tracking issue #16'yı tekrar doğrula. Worktree temizse bu checkpoint'ten devam et. Codex çalışmaya başladığında yeni uncommitted değişiklikler varsa bunları kullanıcı/önceki agent çalışması say; incelemeden reset, clean, checkout, stash-drop veya overwrite ile silme.
+Çalışma ağacı temiz bir checkpoint olarak branch'e kaydedildi ve remote'a push edildi. Temel implementation checkpoint'i `f1e67ebe58b423c0fcb2611819378a15474695f5` commit'idir; bunun üzerinde yalnız goal dokümanı düzeltme commit'leri bulunabilir. İlk iş olarak `git status`, `git diff`, branch/base SHA, remote tracking ve tracking issue #16'yı tekrar doğrula. Worktree temizse mevcut branch head'inden devam et. Codex çalışmaya başladığında yeni uncommitted değişiklikler varsa bunları kullanıcı/önceki agent çalışması say; incelemeden reset, clean, checkout, stash-drop veya overwrite ile silme.
 
 Beklenen checkpoint alanları:
 
