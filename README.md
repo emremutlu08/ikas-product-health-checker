@@ -1,14 +1,49 @@
 # ikas Ürün Sağlığı Asistanı
 
-Read-only ikas admin app MVP for validating merchant interest before building a paid Low Stock Alert.
+ikas admin app that scans a merchant's catalog for product-health problems and — behind an
+explicit, reversible, default-off write surface — offers safe single-field corrections.
 
 ## Current status
 
-- Next.js + TypeScript skeleton created.
-- Mock ikas product dataset added.
-- Health rules engine implemented and tested.
-- Dashboard renders health score, issue counts, issue table, CSV export, and Low Stock Alert CTA placeholder.
-- No ikas mutations are used in v1.
+- Live `listProduct` catalog scan, health score, issue dashboard and CSV export are shipped.
+- Scheduled scans, scan history, low-stock threshold and the daily e-mail summary are Pro features.
+- Low-stock threshold crossing and recovery notifications ship as a **polling** MVP derived from
+  the scheduled scan. No webhook receiver exists; nothing is presented as real-time.
+- Safe single SKU, price and stock corrections and idempotent bulk correction are implemented and
+  offline-accepted, and are **switched off**. They open only after a reversible development-store
+  canary proves that a single-variant `updateProduct` leaves every other field untouched.
+- The app performs no payment, order or customer mutation of any kind.
+
+## Free and PRO capabilities
+
+This table mirrors `src/lib/billing/capability-catalog.ts`, which derives each row's required tier
+from `src/lib/billing/feature-policy.ts` — the same policy the routes enforce. Status is the real
+rollout state, not an aspiration.
+
+| Capability | Free | PRO | Status |
+| --- | :---: | :---: | --- |
+| Manual catalog scan | ✓ | ✓ | Available |
+| Health score and issue dashboard | ✓ | ✓ | Available |
+| CSV export | ✓ | ✓ | Available |
+| Scheduled daily scan | — | ✓ | Needs operator configuration (`IKAS_MONITORING_SCHEDULER_ENABLED`) |
+| Scan history and new/ongoing/resolved diffs | — | ✓ | Available |
+| Low-stock threshold setting | — | ✓ | Available |
+| Daily e-mail summary | — | ✓ | Needs scheduler, mail provider and a verified recipient |
+| Low-stock crossing and recovery notifications | — | ✓ | Beta, polling-based; needs the scheduler |
+| Safe single SKU / price / stock correction | — | ✓ | **Development-store limited** until the canary passes |
+| Idempotent bulk correction | — | ✓ | **Development-store limited** until the canary passes |
+
+No price, currency, billing interval or trial appears anywhere in this app or this table. None has
+been verified from a first-party ikas source, and `PRO_PLAN_KEY` is a Partner-panel listing key,
+not a price.
+
+### Rollout switches
+
+| Variable | Effect |
+| --- | --- |
+| `IKAS_PRODUCT_WRITES_ENABLED` | Server-only kill switch for every correction and its preview. Default off. |
+| `IKAS_PRODUCT_BULK_WRITES_ENABLED` | Additionally gates bulk; also requires the switch above. |
+| `IKAS_MONITORING_SCHEDULER_ENABLED` | Enables scheduled scans, and with them low-stock alerting. |
 
 ## Verified ikas MCP facts
 
@@ -52,14 +87,14 @@ The `.github/workflows/quality.yml` workflow runs `pnpm test:all`, lint, and the
 - Missing/invalid sell price
 - CSV export
 
-## Out of scope for v1
+## Deliberately out of scope
 
-- Product/stock mutations
-- Bulk fix
+- Payment, order and customer mutations of any kind
+- A general-purpose catalog editor: a correction is only offered for a product and variant the
+  latest scan actually flagged, for the exact issue the change would fix
+- Real-time webhook-driven stock alerts, until a captured development-store delivery establishes
+  the replay, retry, ordering and duplicate-delivery contract
 - Storefront widget
-- Payment activation
-- Real-time Low Stock Alert automation and merchant-triggered stock mutations
-- Product/stock/payment mutations
 
 
 ## Adapter/API slice
@@ -127,7 +162,21 @@ Known dev-only console noise:
 
 ## Current milestone
 
-`Ürün Sağlığı Asistanı` now works with live ikas `listProduct` data in read-only mode. Low Stock Alert remains a Phase 2 paid validation hook.
+The safe-operations program is implemented and offline-accepted: unit, browser and real-Redis Lua
+acceptance all pass, and every Free/PRO row reports its true rollout state.
+
+The one remaining gate is external: a reversible `dev-emre2` canary on a named product and variant,
+with a recorded before value, temporary value and rollback, proving that a single-variant
+`updateProduct` preserves every omitted field and every other variant. Until that passes, both
+write switches stay off and the correction surface renders an explanation instead of a control.
+
+### Running the real-Redis acceptance
+
+```bash
+docker run --rm -d --name ikas-acceptance-redis -p 6399:6379 redis:7-alpine
+IKAS_REDIS_ACCEPTANCE=1 ./node_modules/.bin/vitest run src/lib/mutations/redis-acceptance.test.ts
+docker rm -f ikas-acceptance-redis
+```
 
 
 ## Temporary app icon

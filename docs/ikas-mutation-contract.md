@@ -1,6 +1,6 @@
 # ikas product mutation and stock-event contract
 
-Status: **PARTIALLY VERIFIED — preview-only implementation may proceed; production writes remain gated.**
+Status: **SCHEMA RE-VERIFIED — write implementation complete and offline-accepted; production writes remain gated behind a development-store canary.**
 
 Verified on 2026-07-26 against the official ikas Admin MCP endpoint. No mutation was executed while collecting this schema evidence.
 
@@ -30,7 +30,21 @@ read-back returned `read_products,read_inventories,write_products,write_inventor
 production OAuth route now requests that same exact set. This grants capability only: no product,
 price, or inventory mutation was executed during permission acceptance.
 
-**Not yet verified:** whether an input containing one variant is a safe partial update that leaves every omitted variant and omitted variant field unchanged. This must be proved on `dev-emre2` with a reversible test before production wiring.
+`updateProduct` returns the full `Product`, not only `id` and `updatedAt`. The application still
+ignores that response for verification purposes and re-reads the product instead, because a
+mutation response is the provider's account of its own write.
+
+`UpdateProductVariantInput` has no field for variant attributes, variant values or bundle settings.
+Re-sending a "complete" variant is therefore impossible without dropping data the input cannot
+express, which is why the writer sends only `{ id, sku }` and proves safety by comparison instead.
+
+**Still not verified:** whether an input containing one variant is a safe partial update that
+leaves every omitted variant and omitted variant field unchanged. The application does not assume
+it. `src/lib/ikas/product-invariants.ts` captures a flattened view of the whole product before the
+write, re-captures it from a source-of-truth read afterwards, and reports the operation as
+`invariant_violation` — never as a success — if anything except the one intended field moved. That
+comparison is what the `dev-emre2` canary is designed to exercise, and the same check keeps
+guarding production afterwards.
 
 ### `saveVariantStocks`
 
@@ -42,7 +56,8 @@ mutation saveVariantStocks($input: SaveVariantStocksInput!) {
 }
 ```
 
-Each stock input contains:
+Re-verified on 2026-07-26: the entries live under a `stockInputs` field, which the earlier note in
+this file omitted, and the field is a nullable list. Each stock input contains:
 
 - `productId: String!`
 - `variantId: String!`
@@ -66,7 +81,9 @@ mutation updateVariantPrices($input: UpdateVariantPricesInput!) {
 }
 ```
 
-The input accepts an optional `priceListId` and at most **3000** variant entries. Each entry contains:
+Re-verified against the Admin MCP on 2026-07-26. The entries live under a `variantPriceInputs`
+field, which the earlier note in this file omitted; `UpdateVariantPricesInput` accepts an optional
+`priceListId` and at most **3000** variant entries. Each entry contains:
 
 - `productId: String!`
 - `variantId: String!`
@@ -167,13 +184,42 @@ Before any production mutation route is enabled:
 11. store a tenant-bound audit result without tokens or full product payloads;
 12. report partial failures per item and never retry a non-idempotent write blindly.
 
-## First implementation slice
+## Implemented write architecture
 
-The first slice is SKU correction preview only. It performs no GraphQL mutation. A preview is valid only when:
+All twelve requirements above are implemented for SKU, price and stock:
 
-- the latest stored report contains an exact `missing_sku` issue for the product and variant;
-- the proposed SKU is explicit and passes local safety validation;
-- the issue carries a valid product `updatedAt` stale-write guard;
-- the preview states that live verification is still required.
+- `src/lib/mutations/mutation-preview.ts` plans a correction only for a product and variant the
+  latest scan flagged, reads the live product for the before values, and binds the stale guard to
+  the live `updatedAt` rather than to the stored report.
+- `src/lib/mutations/mutation-operation-store.ts` holds the one-time confirmation in a Redis hash
+  whose payload Lua never decodes. Claim, replay rejection, expiry and the tenant deletion barrier
+  are one atomic decision.
+- `src/lib/ikas/product-writer.ts` is the only module that sends a mutation, uses a fixed document
+  per operation, and never retries.
+- `src/lib/mutations/product-mutation-service.ts` performs the exact preflight, the single write,
+  the exact read-back and the whole-product invariant comparison, and reconciles an unknown outcome
+  by reading rather than resending.
 
-A reversible `dev-emre2` mutation test requires explicit approval before execution.
+### Timestamp normalisation
+
+`updatedAt` is a `Timestamp` scalar — epoch milliseconds — while the stored health report carries
+an ISO string. Comparing the two raw forms can never match, so every stale-guard comparison goes
+through `canonicalIkasTimestamp`.
+
+### Decimal semantics
+
+ikas types `sellPrice` as `Float` and publishes no decimal or rounding contract. The application
+refuses to invent one: a proposed price is accepted only as a plain decimal literal, converted
+once, and then proved by an exact read-back comparison. If the platform rounds the value, the
+read-back mismatches and the operation is reported as unverified rather than accepted.
+
+## Offline acceptance completed
+
+Every Lua script in this program has been executed against a real Redis 7 (`docker run --rm
+redis:7-alpine`) through an Upstash-REST facade, not a stub. See
+`src/lib/mutations/redis-acceptance.test.ts` — 20 assertions covering a 25-way claim race with
+exactly one winner, replay rejection, script-enforced expiry, permanent tenant-deletion barrier,
+tenant isolation, one-time bulk plan confirmation, and single-sender outbox delivery.
+
+A reversible `dev-emre2` mutation test still requires explicit approval before execution, and the
+production write flag stays off until it passes.

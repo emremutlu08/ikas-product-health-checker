@@ -54,3 +54,19 @@ The UI now reads through `getProductHealthReport()` instead of importing sample 
 - `src/app/api/report.csv/route.ts` returns CSV.
 
 The runtime is now live-only: dashboard and report requests require a validated HttpOnly installation session whose tenant context matches a durable server-side OAuth record. `MockIkasProductAdapter` remains a test fixture and is never a runtime fallback. Production tokens come from the managed Redis-compatible REST store described in `docs/ikas-app-dev-workflow.md`; they are not supplied through a query parameter, static admin-token environment variable, or browser session.
+
+## Superseded scope decision — 2026-07-26
+
+The "V1 read-only / no mutation" decision recorded above was the correct starting scope and is kept
+here as history rather than rewritten.
+
+It is now superseded for one narrow surface: safe single-field SKU, price and stock corrections and
+idempotent bulk correction, each behind an explicit merchant confirmation and a default-off
+server-only kill switch. The reasoning that produced the original decision is what shaped the
+replacement — the app still refuses to become a general catalog editor, still performs no payment,
+order or customer mutation, and still treats an unverified provider behaviour as a blocker rather
+than an assumption.
+
+Everything else in that decision stands. See `docs/live-ikas-gate.md` for the current write-surface
+status and `docs/ikas-mutation-contract.md` for what is and is not verified about the mutations
+themselves.

@@ -1,6 +1,6 @@
 # ikas webhook contract
 
-Status: **SDK VERIFICATION BOUNDARY CONFIRMED; live delivery acceptance remains open.**
+Status: **SDK VERIFICATION BOUNDARY CONFIRMED; live delivery acceptance remains open. Low-stock alerting ships without webhooks.**
 
 This file records what the official ikas documentation and installed first-party SDK state
 about app webhooks, and separates that evidence from delivery behaviour that is still
@@ -9,6 +9,23 @@ the undisclosed signature algorithm or canonicalization itself.
 
 The internal, store-agnostic tenant cleanup foundation now exists. It is intentionally
 unwired: no webhook/API route or signature module calls it.
+
+## Low-stock alerting is polling, and says so
+
+The shipped low-stock crossing and recovery notifications are derived from the scheduled scan, not
+from `store/stock/created` or `store/stock/updated` deliveries. No webhook route exists in this
+application, no signature is validated, and nothing here is presented to a merchant as real-time.
+
+That is a deliberate consequence of the open questions below: without a captured development-store
+delivery there is no evidence about replay windows, retry behaviour, ordering or duplicate
+delivery, and a receiver built on guesses about those would either miss events or act on them
+twice. Polling from a scan the app already performs has none of those unknowns.
+
+If webhooks are added later they must use only `validateIkasWebhookSignature` and
+`getParsedIkasWebhookData`, and the alert state machine already in
+`src/lib/alerts/low-stock-alerts.ts` is the natural consumer: it is keyed by tenant, product,
+variant and stock location and is idempotent per scan, so an event-driven source would replace the
+observation input without changing the notification rules.
 
 ## Verified first-party facts
 

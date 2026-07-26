@@ -108,7 +108,22 @@ Known non-blocking dev noise:
 
 The internal tenant-bound uninstall cleanup foundation now exists, including a durable non-expiring deletion barrier that production Redis mutations check atomically. Webhook wiring remains blocked until this repository contains a confirmed ikas uninstall event, signed-byte/secret contract, replay policy, retry contract, and reinstall identity semantics. No speculative webhook should be deployed.
 
-Current rule: live report is read-only. Do not add product, stock, price, or payment mutations to V1.
+## Write surface status — 2026-07-26
+
+The read-only V1 rule above described the shipped product before safe corrections existed. It is
+superseded for SKU, price and stock corrections, and still holds for everything else — the app
+performs no payment, order or customer mutation of any kind.
+
+The correction surface is implemented, offline-accepted and **default-off**:
+
+- `IKAS_PRODUCT_WRITES_ENABLED` gates every single correction and its preview. Unset means closed.
+- `IKAS_PRODUCT_BULK_WRITES_ENABLED` additionally gates bulk, and requires the flag above as well.
+- With the flags closed, `/corrections` renders an explanation instead of a control, and the plan
+  matrix shows the capability as `Geliştirme mağazasıyla sınırlı`.
+
+Neither flag may be opened until a reversible `dev-emre2` canary has proved, with a recorded
+before/after/rollback, that a single-variant `updateProduct` leaves every other variant and every
+omitted field unchanged.
 
 
 ## Temporary app icon
