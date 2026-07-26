@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PRO_PLAN_KEY, resolvePlanKey } from "./plan-catalog";
+import { PRO_PLAN_KEY, PRO_PLAN_KEYS, resolvePlanKey } from "./plan-catalog";
 
 describe("resolvePlanKey", () => {
   it("maps the immutable pro listing key to the pro tier", () => {
@@ -9,6 +9,23 @@ describe("resolvePlanKey", () => {
       planKey: "productHealthPro",
       tier: "pro",
     });
+  });
+
+  // One listing per currency, same product. A region missing here would leave a paying merchant
+  // with no entitlement, because an unrecognised key default-denies rather than falling back.
+  it("maps every regional pro listing to the same tier", () => {
+    expect([...PRO_PLAN_KEYS]).toEqual([
+      "productHealthPro",
+      "productHealthProeu",
+      "productHealthProus",
+    ]);
+    for (const key of PRO_PLAN_KEYS) {
+      expect(resolvePlanKey(key), `expected pro for ${key}`).toEqual({
+        known: true,
+        planKey: key,
+        tier: "pro",
+      });
+    }
   });
 
   it("default-denies every key outside the catalog", () => {
