@@ -125,6 +125,19 @@ Neither flag may be opened until a reversible `dev-emre2` canary has proved, wit
 before/after/rollback, that a single-variant `updateProduct` leaves every other variant and every
 omitted field unchanged.
 
+### Canary status — 2026-07-28
+
+The recorded canary ran on a **single-variant** product, so the sibling-variant case it exists to
+prove is still open. Two things block the multi-variant run:
+
+1. The stored `dev-emre2` token has expired and now returns `LOGIN_REQUIRED`. A fresh
+   `npx ikas app dev` install is required.
+2. Every variant in `dev-emre2` has `sku: null`, and `SkuWriteRequest.sku` is typed `string`, so
+   there is no baseline to roll back to. The target variant needs a real SKU set first — set by
+   hand in the ikas admin, not by the app, so the canary's own write remains the only one measured.
+
+The write flags stay closed until that run is recorded here.
+
 
 ## Temporary app icon
 
