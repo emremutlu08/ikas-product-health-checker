@@ -39,7 +39,7 @@ drops for a reason the merchant cannot find on screen is worse than no number at
 
 | Promise | Status | What is missing |
 | --- | --- | --- |
-| Günde bir kez otomatik tarama | **Verification pending** | `IKAS_MONITORING_SCHEDULER_ENABLED` was set to `true` and production redeployed on 2026-07-28. Until the cron's own log line turns from 503 into 200 this stays unproven — the flag being set is not evidence that a scan ran. |
+| Günde bir kez otomatik tarama | **Runs, never scheduled anything** | The cron now answers 200 instead of refusing itself, but it has yet to schedule a single scan — see below. |
 | Tarama geçmişi ve sorun farkları | **Unproven live** | Implemented and Pro-gated. No store has ever held a Pro subscription, so this has never run against a real entitlement. |
 | Düşük stok eşiği ayarı | **Unproven live** | Same. |
 | Günlük e-posta özeti | **Half configured** | `RESEND_API_KEY` and `IKAS_EMAIL_FROM` now exist in Vercel Production, so `isDailySummaryEmailConfigured()` should pass. But the sender domain `mail.emre-mutlu.com.tr` is not yet verified in Resend, and Resend refuses to send from an unverified domain — so no summary reaches anyone yet. |
@@ -63,6 +63,24 @@ authorization was ever considered. So the cron's own 503 can only come from the 
 `IKAS_MONITORING_SCHEDULER_ENABLED` is not `"true"`. No environment variable was decrypted or
 downloaded to establish this.
 
+### The scheduler after the flag was set — 2026-07-28
+
+`IKAS_MONITORING_SCHEDULER_ENABLED` was set to `true` and production redeployed. The 23:00 UTC cron
+answered 200:
+
+```json
+{"event":"ikas_daily_monitoring","outcome":"completed","inspected":1,
+ "claimed":0,"scheduled":0,"completed":0,"sent":0,"emailSkipped":0,
+ "alertsSent":0,"alertsFailed":0,"busy":0,"failed":0}
+```
+
+That proves the flag took and the endpoint no longer refuses itself. It does **not** prove the
+promise. `claimed: 0, scheduled: 0` means the one installation it inspected was passed over,
+because automatic scanning is Pro-gated and `dev-emre2` is on the free option. The scheduled-scan
+path itself is still unexercised, and will stay that way until a store holds a real Pro
+entitlement. `sent: 0` likewise means no email was even attempted, so this run says nothing about
+the email transport.
+
 Nobody is harmed by the last four today: no store can subscribe to Pro yet, because ikas does not
 support switching an installed store from the free option to a paid plan
 ("Mağazaların aktif planlarını değiştirme özelliği henüz mevcut değildir"). But the promises are in
@@ -82,10 +100,9 @@ the submitted listing, so they must be closed before the first Pro subscription 
    records it issues. The API key and the from-address are already in Vercel Production; the domain
    is the only thing left, and Resend rejects every send until it is verified. Alternatively, drop
    the two email promises from the plan description.
-2. **Scheduler proof.** The flag is set and production is redeployed. Watch the hourly cron's log
-   line for `/api/internal/monitoring/daily` and record the first 200 here. A 503 there means the
-   flag did not take, because an invalid `CRON_SECRET` would answer 503 *before* authorization and
-   an unauthenticated probe answers 401.
+2. **A scheduled scan that actually runs.** The cron is alive and returns 200, but it has never
+   claimed an installation, because the only installed store is on the free option. This closes
+   only once a Pro store exists and a run reports `scheduled: 1` or more.
 3. **Multi-variant canary.** The recorded canary ran against a single-variant product, so
    `updateProduct` writing one variant has never been proven to leave *sibling variants* alone.
    Blocked on a live development token — the stored `dev-emre2` token now returns `LOGIN_REQUIRED`,
