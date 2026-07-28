@@ -39,11 +39,11 @@ drops for a reason the merchant cannot find on screen is worse than no number at
 
 | Promise | Status | What is missing |
 | --- | --- | --- |
-| Günde bir kez otomatik tarama | **Not kept** | The scheduler flag is not `"true"` in production, so no automatic scan runs. Proven from production logs without reading any secret — see below. |
+| Günde bir kez otomatik tarama | **Verification pending** | `IKAS_MONITORING_SCHEDULER_ENABLED` was set to `true` and production redeployed on 2026-07-28. Until the cron's own log line turns from 503 into 200 this stays unproven — the flag being set is not evidence that a scan ran. |
 | Tarama geçmişi ve sorun farkları | **Unproven live** | Implemented and Pro-gated. No store has ever held a Pro subscription, so this has never run against a real entitlement. |
 | Düşük stok eşiği ayarı | **Unproven live** | Same. |
-| Günlük e-posta özeti | **Not deliverable** | Production has no `RESEND_API_KEY` and no `IKAS_EMAIL_FROM`, so `isDailySummaryEmailConfigured()` returns false and no summary can be sent. |
-| Düşük stok ve toparlanma bildirimleri | **Not deliverable** | Same transport, same gap. |
+| Günlük e-posta özeti | **Half configured** | `RESEND_API_KEY` and `IKAS_EMAIL_FROM` now exist in Vercel Production, so `isDailySummaryEmailConfigured()` should pass. But the sender domain `mail.emre-mutlu.com.tr` is not yet verified in Resend, and Resend refuses to send from an unverified domain — so no summary reaches anyone yet. |
+| Düşük stok ve toparlanma bildirimleri | **Half configured** | Same transport, same gap. |
 
 ### How the scheduler flag was read without reading the secret — 2026-07-29
 
@@ -78,16 +78,20 @@ the submitted listing, so they must be closed before the first Pro subscription 
 
 ## Open gates before the first Pro subscription
 
-1. **Email transport.** Provision Resend and set `RESEND_API_KEY` + `IKAS_EMAIL_FROM` in Vercel
-   Production, or remove the two email promises from the plan description.
-2. **Scheduler flag.** Set `IKAS_MONITORING_SCHEDULER_ENABLED=true` in Vercel Production and
-   redeploy. It is currently not `"true"`, so the hourly cron refuses itself with 503 and the
-   promised daily scan never happens. Confirm afterwards by checking that the cron's log line turns
-   into a 200.
+1. **Sender domain.** Verify `mail.emre-mutlu.com.tr` in Resend by publishing the MX and the two TXT
+   records it issues. The API key and the from-address are already in Vercel Production; the domain
+   is the only thing left, and Resend rejects every send until it is verified. Alternatively, drop
+   the two email promises from the plan description.
+2. **Scheduler proof.** The flag is set and production is redeployed. Watch the hourly cron's log
+   line for `/api/internal/monitoring/daily` and record the first 200 here. A 503 there means the
+   flag did not take, because an invalid `CRON_SECRET` would answer 503 *before* authorization and
+   an unauthenticated probe answers 401.
 3. **Multi-variant canary.** The recorded canary ran against a single-variant product, so
    `updateProduct` writing one variant has never been proven to leave *sibling variants* alone.
    Blocked on a live development token — the stored `dev-emre2` token now returns `LOGIN_REQUIRED`,
    and `dev-emre2` has no variant with a SKU to use as a rollback baseline.
-4. **Live Pro run.** Subscribe a store to Pro at install time (`dev-emre3` is allowed and unused)
-   and confirm `getMerchantLicence` returns a `storeAppListingSubscriptionKey` the plan catalog
-   recognises, before opening any write flag.
+4. **Live Pro run.** No store is available for this yet. `dev-emre2` and `dev-emremutlu` already
+   have the app installed under the free option, and ikas does not let an installed store change
+   plan; ikas has asked that `dev-emre3` be left untouched. A store must be agreed with ikas, then
+   the app installed there choosing a paid plan *at install time*, before `getMerchantLicence` can
+   be checked for a recognised `storeAppListingSubscriptionKey` and any write flag opened.
