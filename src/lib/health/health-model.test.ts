@@ -21,8 +21,11 @@ describe("recorded behaviour of the previous absolute score", () => {
    * same answer for all of them. The shipped formula subtracted an un-normalized penalty and
    * did not, which is the defect this module replaces.
    */
+  // The small-catalog figure rose once the score stopped counting issues that never reach a rule
+  // card. The defect being recorded is unaffected: the penalty is still un-normalized, so it
+  // still collapses to zero as the catalog grows.
   it("collapses to zero as catalog size grows at constant issue density", () => {
-    expect(reportFor(10).score).toBe(57);
+    expect(reportFor(10).score).toBe(60);
     expect(reportFor(100).score).toBe(0);
     expect(reportFor(1000).score).toBe(0);
   });
@@ -52,7 +55,7 @@ describe("equal issue density scores the same across catalog sizes", () => {
   it("returns an identical score for 10, 100, and 1000 products", () => {
     const scores = assessments.map((assessment) => assessment.score);
 
-    expect(scores).toEqual([76, 76, 76]);
+    expect(scores).toEqual([78, 78, 78]);
   });
 
   it("returns an identical state for every size band", () => {

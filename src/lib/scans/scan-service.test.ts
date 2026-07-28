@@ -1,9 +1,13 @@
+import { MISTAKE_RULE_CODES, RULE_LABELS } from "@/lib/ikas/health-rules";
+import type { MistakeRuleCode } from "@/lib/ikas/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IkasAuthenticationError, IkasUpstreamError } from "@/lib/ikas/errors";
 import { PRODUCT_SCAN_MAX_DURATION_MS } from "@/lib/ikas/product-adapter";
 import type { HealthReport } from "@/lib/ikas/types";
 import { MemorySnapshotStore, SnapshotStoreError, type ScanSnapshot } from "./snapshot-store";
 import {
+
+
   isScanRunning,
   runManualScan,
   runScheduledScan,
@@ -11,6 +15,19 @@ import {
   ScanBusyError,
   type ManualScanDependencies,
 } from "./scan-service";
+
+/**
+ * Derived from the canonical rule list rather than spelled out, so adding a rule does not turn
+ * every fixture in this file into a false failure — production emits one summary per rule, and
+ * the schema enforces exactly that set.
+ */
+function summariesFor(counts: Partial<Record<MistakeRuleCode, number>>) {
+  return MISTAKE_RULE_CODES.map((code) => ({
+    code,
+    label: RULE_LABELS[code],
+    count: counts[code] ?? 0,
+  }));
+}
 
 const installation = {
   authorizedAppId: "app-1",
@@ -54,15 +71,7 @@ function reportFor(score = 82, generatedAt = "2026-07-20T08:00:00.000Z"): Health
     warningCount: 0,
     infoCount: 0,
     outOfStockBlockedCount: 0,
-    ruleSummaries: [
-      { code: "incorrect_price", label: "Hatalı Fiyat", count: 0 },
-      { code: "out_of_stock", label: "Stokta Yok", count: 0 },
-      { code: "missing_images", label: "Görsel Eksik", count: 0 },
-      { code: "missing_sku", label: "SKU Eksik", count: 1 },
-      { code: "same_sku", label: "Aynı SKU", count: 0 },
-      { code: "duplicate_title", label: "Tekrarlanan Başlık", count: 0 },
-      { code: "weird_description", label: "Sorunlu Açıklama", count: 0 },
-    ],
+    ruleSummaries: summariesFor({ missing_sku: 1 }),
     productRows: [
       {
         productId: "product-1",

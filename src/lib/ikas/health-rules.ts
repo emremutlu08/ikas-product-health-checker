@@ -39,6 +39,8 @@ export const RULE_LABELS: Record<MistakeRuleCode, string> = {
   missing_images: "Görsel Eksik",
   missing_sku: "SKU Eksik",
   same_sku: "Aynı SKU",
+  missing_barcode: "Barkod Eksik",
+  same_barcode: "Aynı Barkod",
   duplicate_title: "Tekrarlanan Başlık",
   weird_description: "Sorunlu Açıklama",
 };
@@ -47,6 +49,13 @@ export const RULE_LABELS: Record<MistakeRuleCode, string> = {
  * The single mapping from an issue code to the merchant-facing rule it rolls up into.
  * Exported so the snapshot store can re-derive rule summaries and product rows from the
  * persisted issues; a second private copy would drift and reject valid reports.
+ *
+ * An issue code missing from this map is invisible to the merchant: it produces no rule card and
+ * is stripped from the product table. That is why `buildHealthReport` derives the score and the
+ * severity counts from the mapped issues only — a number the merchant cannot trace back to a row
+ * is worse than no number, and a store could otherwise fix every listed problem and still be told
+ * it scores zero. Detection of the unmapped codes is kept for diagnostics and for the low-stock
+ * alerting path, which reads `issues` and `issueCountsByCode` directly.
  */
 export const ISSUE_TO_RULE: Partial<Record<HealthIssueCode, MistakeRuleCode>> = {
   missing_price: "incorrect_price",
@@ -54,7 +63,13 @@ export const ISSUE_TO_RULE: Partial<Record<HealthIssueCode, MistakeRuleCode>> = 
   missing_image: "missing_images",
   missing_sku: "missing_sku",
   duplicate_sku: "same_sku",
+  missing_barcode: "missing_barcode",
+  duplicate_barcode: "same_barcode",
   duplicate_title: "duplicate_title",
+  // Both description faults roll up into one rule: to a merchant "no description" and "a
+  // description that says nothing" are the same job, and splitting them would put a second
+  // near-identical card on the panel.
+  missing_description: "weird_description",
   weird_description: "weird_description",
 };
 
@@ -289,16 +304,21 @@ export function buildHealthReport(
   const issueCountsByCode = Object.fromEntries(ISSUE_CODES.map((code) => [code, 0])) as Record<HealthIssueCode, number>;
   for (const issue of issues) issueCountsByCode[issue.code] += 1;
 
-  const criticalCount = issues.filter((issue) => issue.severity === "critical").length;
-  const warningCount = issues.filter((issue) => issue.severity === "warning").length;
-  const infoCount = issues.filter((issue) => issue.severity === "info").length;
-  const weightedPenalty = issues.reduce((total, issue) => total + WEIGHTS[issue.severity], 0);
+  // Everything the merchant is shown — the score, the severity counts, the affected-product
+  // total — is derived from the issues that actually reach a rule card, so every number on the
+  // dashboard can be traced back to a row the merchant can open and fix.
+  const visibleIssues = issues.filter((issue) => ISSUE_TO_RULE[issue.code] !== undefined);
+
+  const criticalCount = visibleIssues.filter((issue) => issue.severity === "critical").length;
+  const warningCount = visibleIssues.filter((issue) => issue.severity === "warning").length;
+  const infoCount = visibleIssues.filter((issue) => issue.severity === "info").length;
+  const weightedPenalty = visibleIssues.reduce((total, issue) => total + WEIGHTS[issue.severity], 0);
   const score = Math.max(0, Math.round(100 - weightedPenalty * 0.9));
-  const affectedProductIds = new Set(issues.map((issue) => issue.productId));
+  const affectedProductIds = new Set(visibleIssues.map((issue) => issue.productId));
 
   const ruleCounts = new Map<MistakeRuleCode, Set<string>>();
   for (const code of MISTAKE_RULE_CODES) ruleCounts.set(code, new Set());
-  for (const issue of issues) {
+  for (const issue of visibleIssues) {
     const rule = ISSUE_TO_RULE[issue.code];
     if (rule) ruleCounts.get(rule)?.add(issue.productId);
   }
@@ -332,7 +352,7 @@ export function buildHealthReport(
     score,
     productCount: visibleProducts.length,
     variantCount,
-    issueCount: issues.length,
+    issueCount: visibleIssues.length,
     affectedProductCount: affectedProductIds.size,
     scanStatus: "success",
     issueCountsByCode,

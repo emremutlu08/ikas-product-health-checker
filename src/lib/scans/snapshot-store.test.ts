@@ -1,8 +1,12 @@
+import { MISTAKE_RULE_CODES, RULE_LABELS } from "@/lib/ikas/health-rules";
+import type { MistakeRuleCode } from "@/lib/ikas/types";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { PRODUCT_SCAN_MAX_PRODUCTS } from "@/lib/ikas/product-adapter";
 import type { HealthIssue, HealthReport } from "@/lib/ikas/types";
 import {
+
+
   createSnapshotStore,
   isSnapshotStale,
   MAX_HISTORY_ENTRIES,
@@ -15,6 +19,19 @@ import {
   toSafeSnapshot,
   type ScanSnapshot,
 } from "./snapshot-store";
+
+/**
+ * Derived from the canonical rule list rather than spelled out, so adding a rule does not turn
+ * every fixture in this file into a false failure — production emits one summary per rule, and
+ * the schema enforces exactly that set.
+ */
+function summariesFor(counts: Partial<Record<MistakeRuleCode, number>>) {
+  return MISTAKE_RULE_CODES.map((code) => ({
+    code,
+    label: RULE_LABELS[code],
+    count: counts[code] ?? 0,
+  }));
+}
 
 const credentials = {
   UPSTASH_REDIS_REST_URL: "https://redis.example.test",
@@ -60,15 +77,7 @@ const report: HealthReport = {
   outOfStockBlockedCount: 1,
   // Production emits one summary per canonical rule, including the rules no issue triggered,
   // so the dashboard's filter row is the same width on every scan.
-  ruleSummaries: [
-    { code: "incorrect_price", label: "Hatalı Fiyat", count: 0 },
-    { code: "out_of_stock", label: "Stokta Yok", count: 1 },
-    { code: "missing_images", label: "Görsel Eksik", count: 0 },
-    { code: "missing_sku", label: "SKU Eksik", count: 1 },
-    { code: "same_sku", label: "Aynı SKU", count: 0 },
-    { code: "duplicate_title", label: "Tekrarlanan Başlık", count: 0 },
-    { code: "weird_description", label: "Sorunlu Açıklama", count: 0 },
-  ],
+  ruleSummaries: summariesFor({ out_of_stock: 1, missing_sku: 1 }),
   productRows: [
     {
       productId: "product-1",

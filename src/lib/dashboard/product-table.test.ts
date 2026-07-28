@@ -146,8 +146,8 @@ describe("buildProductIssueRows", () => {
       report({
         productRows: [row({ productId: "a" })],
         issues: [
-          // missing_barcode is not mapped to a rule, so it must not raise the row severity.
-          issue({ productId: "a", severity: "critical", code: "missing_barcode" }),
+          // missing_category is not mapped to a rule, so it must not raise the row severity.
+          issue({ productId: "a", severity: "critical", code: "missing_category" }),
           issue({ productId: "a", severity: "info", code: "missing_image" }),
         ],
       }),

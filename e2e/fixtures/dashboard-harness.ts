@@ -63,6 +63,8 @@ const RULE_ISSUE: Record<MistakeRuleCode, { code: HealthIssueCode; severity: Hea
     incorrect_price: { code: "missing_price", severity: "critical" },
     missing_sku: { code: "missing_sku", severity: "critical" },
     same_sku: { code: "duplicate_sku", severity: "critical" },
+    missing_barcode: { code: "missing_barcode", severity: "warning" },
+    same_barcode: { code: "duplicate_barcode", severity: "warning" },
     out_of_stock: { code: "zero_stock_blocked", severity: "warning" },
     missing_images: { code: "missing_image", severity: "warning" },
     duplicate_title: { code: "duplicate_title", severity: "warning" },

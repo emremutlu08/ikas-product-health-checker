@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHealthReport } from "./health-rules";
+import { buildHealthReport, ISSUE_TO_RULE } from "./health-rules";
 import { issuesToCsv } from "./csv";
 import { sampleProducts } from "./sample-products";
 import { buildProduct, buildVariant } from "@/lib/mutations/mutation-fixtures";
@@ -67,11 +67,46 @@ describe("buildHealthReport", () => {
   });
 
   it("preserves health score and rule behaviour while the stock metric is renamed", () => {
-    expect(report.score).toBe(41);
+    // 5 critical x 7 + 6 warning x 4 = 59 penalty, so 100 - 59 * 0.9 rounds to 47.
+    expect(report.score).toBe(47);
     expect(report.criticalCount).toBe(5);
-    expect(report.warningCount).toBe(7);
-    expect(report.infoCount).toBe(3);
+    expect(report.warningCount).toBe(6);
+    expect(report.infoCount).toBe(0);
     expect(report.ruleSummaries.find((rule) => rule.code === "out_of_stock")?.count).toBe(1);
+  });
+
+  /**
+   * The score is the number a merchant is judged by, so it may only move for problems they can
+   * actually find. This fixture also trips missing_category, missing_brand and missing_vendor,
+   * none of which roll up into a rule card — counting them would leave a store unable to reach
+   * 100 no matter how many listed problems it fixed, with nothing on screen explaining why.
+   */
+  it("scores and counts only the issues a merchant can see on the panel", () => {
+    const invisible = report.issues.filter((issue) => ISSUE_TO_RULE[issue.code] === undefined);
+    expect(invisible.length, "fixture must still exercise unmapped codes").toBeGreaterThan(0);
+    expect(new Set(invisible.map((issue) => issue.code))).toEqual(
+      new Set(["missing_category", "missing_brand", "missing_vendor"]),
+    );
+
+    expect(report.issueCount).toBe(report.issues.length - invisible.length);
+    expect(report.criticalCount + report.warningCount + report.infoCount).toBe(report.issueCount);
+
+    // Detection itself is untouched: the unmapped codes are still available to diagnostics and
+    // to the low-stock alerting path, they simply no longer move a merchant-facing number.
+    expect(report.issueCountsByCode.missing_category).toBe(1);
+  });
+
+  it("surfaces barcode faults as their own rules, which the app store listing promises", () => {
+    expect(report.ruleSummaries.find((rule) => rule.code === "missing_barcode")?.count).toBe(1);
+    expect(report.ruleSummaries.find((rule) => rule.code === "same_barcode")?.count).toBe(2);
+    expect(report.productRows.some((row) => row.mistakes.includes("Barkod Eksik"))).toBe(true);
+    expect(report.productRows.some((row) => row.mistakes.includes("Aynı Barkod"))).toBe(true);
+  });
+
+  it("rolls a missing description into the same rule as a useless one", () => {
+    expect(report.issueCountsByCode.missing_description).toBe(1);
+    expect(ISSUE_TO_RULE.missing_description).toBe("weird_description");
+    expect(report.ruleSummaries.find((rule) => rule.code === "weird_description")?.count).toBe(2);
   });
 
   it("builds mistake finder rule summaries and product rows", () => {

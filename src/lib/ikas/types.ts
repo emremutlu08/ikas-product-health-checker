@@ -103,6 +103,8 @@ export type MistakeRuleCode =
   | "missing_images"
   | "missing_sku"
   | "same_sku"
+  | "missing_barcode"
+  | "same_barcode"
   | "duplicate_title"
   | "weird_description";
 
