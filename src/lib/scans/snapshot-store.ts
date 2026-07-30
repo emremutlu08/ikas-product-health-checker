@@ -200,13 +200,24 @@ function checkReportInvariants(snapshot: z.infer<typeof baseSnapshotSchema>, ctx
   const productIdsByRule = new Map<MistakeRuleCode, Set<string>>();
   const mistakeLabelsByProduct = new Map<string, Set<string>>();
 
+  /**
+   * `issueCountsByCode` records every detection, including the codes that reach no rule card.
+   * Every other aggregate is merchant-facing and must therefore be derived the way
+   * `buildHealthReport` derives it — from the issues that actually surface — so a number on the
+   * dashboard always traces back to a row the merchant can open.
+   */
+  let visibleIssueCount = 0;
+
   for (const issue of report.issues) {
-    severityCounts[issue.severity] += 1;
     countsByCode[issue.code] += 1;
-    affectedProductIds.add(issue.productId);
 
     const rule = ISSUE_TO_RULE[issue.code];
     if (!rule) continue;
+
+    visibleIssueCount += 1;
+    severityCounts[issue.severity] += 1;
+    affectedProductIds.add(issue.productId);
+
     const products = productIdsByRule.get(rule) ?? new Set<string>();
     products.add(issue.productId);
     productIdsByRule.set(rule, products);
@@ -216,7 +227,7 @@ function checkReportInvariants(snapshot: z.infer<typeof baseSnapshotSchema>, ctx
     mistakeLabelsByProduct.set(issue.productId, labels);
   }
 
-  if (report.issueCount !== report.issues.length) {
+  if (report.issueCount !== visibleIssueCount) {
     fail("issue count disagrees with the issue rows", ["issueCount"]);
   }
   if (report.criticalCount !== severityCounts.critical) {
@@ -393,6 +404,12 @@ export type SnapshotStoreErrorCode =
   | "configuration"
   | "backend"
   | "corrupt_record"
+  /**
+   * A record written before the rule table grew. It is not corrupt — it was valid when written —
+   * so it must not be reported as corruption, and it must not take the dashboard down with it.
+   * Readers drop it and the merchant sees the pre-scan state, one click away from a fresh report.
+   */
+  | "stale_rule_set"
   | "history_disabled"
   | "lease_lost"
   | "payload_too_large"
@@ -449,7 +466,7 @@ function validateTenant(tenant: SnapshotTenant, operation: SnapshotStoreOperatio
  */
 function tenantDigest(tenant: SnapshotTenant) {
   return createHash("sha256")
-    .update(`${tenant.authorizedAppId} ${tenant.merchantId}`, "utf8")
+    .update(`${tenant.authorizedAppId}\u0000${tenant.merchantId}`, "utf8")
     .digest("base64url");
 }
 
@@ -487,6 +504,53 @@ function serializeSnapshotForWrite(snapshot: ScanSnapshot): {
   return { snapshot: parsed.data as ScanSnapshot, serialized };
 }
 
+/**
+ * True when the record summarises a different set of rules than the app currently publishes.
+ *
+ * Adding a rule is a normal thing to do — a fault the app already detected becomes something the
+ * merchant can see and fix. But every stored report carries one summary per rule, so the older
+ * records stop matching the moment the table changes. Recognising that here keeps a routine
+ * release from looking like data corruption, and keeps a dashboard from failing to render at all
+ * because of a report that was perfectly valid when it was written.
+ */
+function hasStaleRuleSet(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const report = value.report;
+  if (!isRecord(report) || !Array.isArray(report.ruleSummaries)) return false;
+
+  const codes = new Set(
+    report.ruleSummaries
+      .map((summary) => (isRecord(summary) ? summary.code : undefined))
+      .filter((code): code is string => typeof code === "string"),
+  );
+  if (codes.size !== report.ruleSummaries.length) return false;
+
+  return (
+    codes.size !== MISTAKE_RULE_CODES.length ||
+    MISTAKE_RULE_CODES.some((rule) => !codes.has(rule))
+  );
+}
+
+/**
+ * Reads a stored record, dropping the ones written under an older rule table.
+ *
+ * A merchant whose last scan predates a new rule should see the pre-scan state and one button,
+ * not an error page: the record is genuinely out of date, and a fresh scan costs them a click.
+ * Every other failure still raises, so real corruption is never quietly swallowed.
+ */
+function readStoredSnapshotOrDrop(
+  raw: unknown,
+  tenant: SnapshotTenant,
+  operation: "get" | "history" = "get",
+): ScanSnapshot | undefined {
+  try {
+    return parseStoredSnapshot(raw, tenant, operation);
+  } catch (error) {
+    if (error instanceof SnapshotStoreError && error.code === "stale_rule_set") return undefined;
+    throw error;
+  }
+}
+
 function parseStoredSnapshot(
   raw: unknown,
   tenant: SnapshotTenant,
@@ -506,6 +570,10 @@ function parseStoredSnapshot(
   } catch {
     throw new SnapshotStoreError("corrupt_record", operation);
   }
+
+  // Checked before the schema, because a record written under an older rule table fails several
+  // of its invariants at once and would otherwise be indistinguishable from real corruption.
+  if (hasStaleRuleSet(value)) throw new SnapshotStoreError("stale_rule_set", operation);
 
   const parsed = snapshotSchema.safeParse(value);
   if (!parsed.success) throw new SnapshotStoreError("corrupt_record", operation);
@@ -633,7 +701,7 @@ export class RedisRestSnapshotStore implements SnapshotStore {
     const validated = validateTenant(tenant, "get");
     const raw = await this.command(["GET", latestKey(validated)], "get");
     if (raw === null) return undefined;
-    return parseStoredSnapshot(raw, validated);
+    return readStoredSnapshotOrDrop(raw, validated);
   }
 
   async putLatest(
@@ -696,7 +764,9 @@ export class RedisRestSnapshotStore implements SnapshotStore {
       "history",
     );
     if (!Array.isArray(raw)) throw new SnapshotStoreError("backend", "history");
-    return raw.map((record) => parseStoredSnapshot(record, validated, "history"));
+    return raw
+      .map((record) => readStoredSnapshotOrDrop(record, validated, "history"))
+      .filter((snapshot): snapshot is ScanSnapshot => snapshot !== undefined);
   }
 
   async acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number) {
@@ -792,7 +862,7 @@ export class MemorySnapshotStore implements SnapshotStore {
     const validated = validateTenant(tenant, "get");
     const raw = this.snapshots.get(latestKey(validated));
     if (raw === undefined) return undefined;
-    return parseStoredSnapshot(raw, validated);
+    return readStoredSnapshotOrDrop(raw, validated);
   }
 
   async putLatest(
@@ -834,9 +904,9 @@ export class MemorySnapshotStore implements SnapshotStore {
     const validated = validateTenant(tenant, "history");
     const policy = validateRetentionPolicy(retention, "history");
     if (!policy.historyEnabled) throw new SnapshotStoreError("history_disabled", "history");
-    return (this.histories.get(historyKey(validated)) ?? []).map((record) =>
-      parseStoredSnapshot(record, validated, "history"),
-    );
+    return (this.histories.get(historyKey(validated)) ?? [])
+      .map((record) => readStoredSnapshotOrDrop(record, validated, "history"))
+      .filter((snapshot): snapshot is ScanSnapshot => snapshot !== undefined);
   }
 
   async acquireScanLease(tenant: SnapshotTenant, ownerId: string, ttlMs: number) {

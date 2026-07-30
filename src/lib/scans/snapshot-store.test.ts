@@ -1,4 +1,5 @@
-import { MISTAKE_RULE_CODES, RULE_LABELS } from "@/lib/ikas/health-rules";
+import { buildHealthReport, MISTAKE_RULE_CODES, RULE_LABELS } from "@/lib/ikas/health-rules";
+import { sampleProducts } from "@/lib/ikas/sample-products";
 import type { MistakeRuleCode } from "@/lib/ikas/types";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
@@ -553,13 +554,6 @@ describe("fail-closed persisted report invariants", () => {
       }),
     },
     {
-      // A dropped zero-count rule silently removes a filter the merchant expects to see.
-      name: "a rule summary missing for a rule no issue triggered",
-      snapshot: reportWith({
-        ruleSummaries: report.ruleSummaries.filter((summary) => summary.code !== "incorrect_price"),
-      }),
-    },
-    {
       name: "a rule summary count that contradicts the issues",
       snapshot: reportWith({
         ruleSummaries: report.ruleSummaries.map((summary) =>
@@ -573,14 +567,78 @@ describe("fail-closed persisted report invariants", () => {
         ruleSummaries: [...report.ruleSummaries, { code: "missing_sku", label: "SKU Eksik", count: 1 }],
       }),
     },
-    {
-      name: "a rule summary missing for a rule the issues triggered",
-      snapshot: reportWith({
-        ruleSummaries: report.ruleSummaries.filter((summary) => summary.code !== "missing_sku"),
-      }),
-    },
   ])("rejects $name on both write and read", async ({ snapshot }) => {
     await expectRejectedOnPutAndGet(snapshot);
+  });
+
+  /**
+   * A report that summarises a different set of rules than the app publishes is two different
+   * situations depending on which direction it travels. Producing one now is a bug — the writer
+   * and the rule table are the same build — so a write is refused. Finding one in storage is
+   * routine: it was written before the rule was added. That record is dropped, and the merchant
+   * gets the pre-scan screen and a scan button instead of an error page.
+   */
+  describe("a record whose rule set predates the current one", () => {
+    const current = reportWith({});
+    const missingRule = reportWith({
+      ruleSummaries: report.ruleSummaries.filter((summary) => summary.code !== "incorrect_price"),
+    });
+
+    it("is refused on write, because this build cannot legitimately produce one", async () => {
+      await expect(new MemorySnapshotStore().putLatest(missingRule)).rejects.toMatchObject({
+        name: "SnapshotStoreError",
+        operation: "put",
+      });
+    });
+
+    it("is dropped on read rather than reported as corruption", async () => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () => redisResponse(JSON.stringify(missingRule)));
+
+      await expect(redisStore(fetchMock).getLatest(tenant)).resolves.toBeUndefined();
+      // Dropping it must not rewrite the key: the record stays exactly as stored.
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(commandOf(fetchMock)[0]).toBe("GET");
+    });
+
+    it("is filtered out of history without hiding the records that are still valid", async () => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () =>
+          redisResponse([JSON.stringify(missingRule), JSON.stringify(current)]),
+        );
+
+      const history = await redisStore(fetchMock).listHistory(tenant, { historyEnabled: true });
+      expect(history).toHaveLength(1);
+      expect(history[0]!.scanId).toBe(current.scanId);
+    });
+  });
+
+  /**
+   * The gap that let a real regression ship: every schema test above builds its report by hand,
+   * so the schema and the report builder drifted apart without a single test failing, and the
+   * first thing to notice was a merchant's scan failing in production. This one persists what a
+   * real scan actually produces, so the two can never disagree again.
+   */
+  it("stores a report built by the real scan pipeline, not just hand-written fixtures", async () => {
+    const built = buildHealthReport(sampleProducts, new Date("2026-07-29T09:00:00.000Z"));
+    const live: ScanSnapshot = {
+      version: 1,
+      scanId: "live-pipeline-scan",
+      authorizedAppId: tenant.authorizedAppId,
+      merchantId: tenant.merchantId,
+      generatedAt: built.generatedAt,
+      report: built,
+    };
+
+    const store = new MemorySnapshotStore();
+    await expect(store.putLatest(live)).resolves.toBeUndefined();
+
+    const stored = await store.getLatest(tenant);
+    expect(stored?.scanId).toBe("live-pipeline-scan");
+    expect(stored?.report.ruleSummaries).toHaveLength(MISTAKE_RULE_CODES.length);
+    expect(stored?.report.issueCount).toBe(built.issueCount);
   });
 
   it("never repairs a corrupt persisted record into an acceptable one", async () => {
