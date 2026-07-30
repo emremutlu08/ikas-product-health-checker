@@ -82,8 +82,25 @@ export type UnknownPlanKeyWarning = {
   planKey: string;
 };
 
+/**
+ * Emitted whenever a licence was read successfully and still granted nothing.
+ *
+ * Without this, the worst case in the whole billing path is also the quietest: a merchant pays,
+ * the licence answers, no subscription matches, and the app serves Free with not one line
+ * recorded anywhere. `subscriptionCount` separates "the merchant has no subscription at all"
+ * from "they have one and this installation could not claim it", which are different bugs.
+ */
+export type NoEntitlementWarning = {
+  event: "billing.entitlement.not_granted";
+  reason: "MERCHANT_MISMATCH" | "NO_MATCHING_SUBSCRIPTION" | "SUBSCRIPTION_NOT_ACTIVE" | "INVALID_SUBJECT";
+  authorizedAppId: string;
+  merchantId: string | null;
+  /** Subscriptions the licence returned, before any of them were matched to this install. */
+  subscriptionCount: number;
+};
+
 export type EntitlementLogger = {
-  warn(warning: UnknownPlanKeyWarning): void;
+  warn(warning: UnknownPlanKeyWarning | NoEntitlementWarning): void;
 };
 
 export type ResolveLiveEntitlementOptions = {
@@ -233,6 +250,19 @@ export async function resolveLiveEntitlement(
       authorizedAppId: entitlement.authorizedAppId,
       merchantId: entitlement.merchantId,
       planKey: entitlement.planKey ?? "",
+    });
+  } else if (
+    entitlement.reason === "MERCHANT_MISMATCH" ||
+    entitlement.reason === "NO_MATCHING_SUBSCRIPTION" ||
+    entitlement.reason === "SUBSCRIPTION_NOT_ACTIVE" ||
+    entitlement.reason === "INVALID_SUBJECT"
+  ) {
+    options.logger?.warn({
+      event: "billing.entitlement.not_granted",
+      reason: entitlement.reason,
+      authorizedAppId: entitlement.authorizedAppId,
+      merchantId: entitlement.merchantId,
+      subscriptionCount: licence.appSubscriptions.length,
     });
   }
 

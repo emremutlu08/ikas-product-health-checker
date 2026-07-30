@@ -233,6 +233,53 @@ describe("resolveLiveEntitlement", () => {
     expect(Object.keys(warn.mock.calls[0]![0] as object)).toHaveLength(5);
   });
 
+  /**
+   * The failure this covers is the expensive one: a merchant pays, the licence answers, and the
+   * app still serves Free. Before this warning existed that produced no record at all, so the
+   * only way to notice was a merchant reporting it. `subscriptionCount` is what separates
+   * "they never subscribed" from "they did and this install could not claim it".
+   */
+  it.each([
+    {
+      name: "a licence carrying no subscription at all",
+      subscriptions: [],
+      reason: "NO_MATCHING_SUBSCRIPTION",
+      subscriptionCount: 0,
+    },
+    {
+      name: "a subscription this installation cannot claim",
+      subscriptions: [subscription({ authorizedAppId: "someone-elses-install" })],
+      reason: "NO_MATCHING_SUBSCRIPTION",
+      subscriptionCount: 1,
+    },
+    {
+      name: "a subscription that is no longer active",
+      subscriptions: [subscription({ status: "REMOVED" })],
+      reason: "SUBSCRIPTION_NOT_ACTIVE",
+      subscriptionCount: 1,
+    },
+  ])("records $name instead of failing silently", async ({ subscriptions, reason, subscriptionCount }) => {
+    const warn = vi.fn();
+    const getMerchantLicence = vi.fn().mockResolvedValue(licence(subscriptions));
+
+    const entitlement = await resolveLiveEntitlement({ getMerchantLicence }, INSTALLATION, {
+      logger: { warn },
+    });
+
+    expect(entitlement).toMatchObject({ tier: "free", reason });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith({
+      event: "billing.entitlement.not_granted",
+      reason,
+      authorizedAppId: "app-install-1",
+      merchantId: "merchant-1",
+      subscriptionCount,
+    });
+
+    const serialized = JSON.stringify(warn.mock.calls[0]![0]);
+    expect(serialized).not.toMatch(/token|bearer|authorization|password|secret/i);
+  });
+
   it("stays silent and pure for a resolvable licence", async () => {
     const warn = vi.fn();
     const getMerchantLicence = vi.fn().mockResolvedValue(licence([subscription()]));
