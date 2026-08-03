@@ -30,7 +30,7 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function adapter(fetchImpl: typeof fetch) {
-  return new HttpIkasLicenceAdapter("https://example.test/graphql", "token", fetchImpl);
+  return new HttpIkasLicenceAdapter("https://example.test/graphql", "token", "store-app-1", fetchImpl);
 }
 
 describe("HttpIkasLicenceAdapter", () => {
@@ -41,6 +41,7 @@ describe("HttpIkasLicenceAdapter", () => {
 
     expect(licence).toEqual({
       merchantId: "merchant-1",
+      reportedSubscriptionCount: 1,
       appSubscriptions: [
         {
           id: "sub-1",
@@ -70,10 +71,13 @@ describe("HttpIkasLicenceAdapter", () => {
 
     const licence = await adapter(fetchMock).getMerchantLicence("app-install-1");
 
-    expect(licence.appSubscriptions).toEqual([]);
+    // Preserved, not dropped: ikas leaves this null on a plan bought through "Planı Yönet",
+    // and deciding whether it is ours belongs to the entitlement resolver, not the transport.
+    expect(licence.appSubscriptions).toHaveLength(1);
+    expect(licence.appSubscriptions[0]!.authorizedAppId).toBeNull();
   });
 
-  it("ignores malformed subscriptions owned by another installation", async () => {
+  it("skips a malformed subscription instead of failing the whole licence", async () => {
     const payload = structuredClone(licencePayload);
     payload.data.getMerchantLicence.appSubscriptions.unshift({
       id: "foreign-subscription",
@@ -85,10 +89,27 @@ describe("HttpIkasLicenceAdapter", () => {
     });
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(payload));
 
+    // Most subscriptions in a merchant's licence belong to other apps. One of them drifting from
+    // the documented shape must not deny this app's merchant their own subscription.
     await expect(adapter(fetchMock).getMerchantLicence("app-install-1")).resolves.toEqual({
       merchantId: "merchant-1",
       appSubscriptions: licencePayload.data.getMerchantLicence.appSubscriptions,
+      reportedSubscriptionCount: 2,
     });
+  });
+
+  it("skips a record whose own listing id is unusable, since it cannot be claimed as ours", async () => {
+    const overLong = "x".repeat(MAX_IDENTIFIER_LENGTH + 1);
+
+    for (const storeAppId of ["", overLong, "another-app"]) {
+      const payload = structuredClone(licencePayload);
+      payload.data.getMerchantLicence.appSubscriptions[0]!.storeAppId = storeAppId;
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(payload));
+
+      const licence = await adapter(fetchMock).getMerchantLicence("app-install-1");
+      // Still counted, so the entitlement warning shows a record was seen and not understood.
+      expect(licence.reportedSubscriptionCount, storeAppId).toBe(1);
+    }
   });
 
   // A status outside the live enum is malformed upstream data, not a fourth business state.
@@ -118,15 +139,14 @@ describe("HttpIkasLicenceAdapter", () => {
     }
   });
 
-  // Empty and unbounded fields on this installation's record are malformed, not data. Foreign
-  // records are deliberately filtered before strict validation so another app cannot poison our read.
-  it("rejects empty and over-long identifiers and plan keys", async () => {
-    const overLong = "x".repeat(MAX_IDENTIFIER_LENGTH + 1);
+  // Empty and unbounded fields on this app's own record are malformed, not data: reading them
+  // leniently would downgrade a paying merchant instead of raising the unknown state that earns
+  // grace. Records belonging to other apps are skipped instead, so their data cannot poison ours.
+  it("rejects a malformed record that is identifiably this app's", async () => {
     const cases: Array<Record<string, unknown>> = [
-      { storeAppId: "" },
-      { storeAppId: overLong },
       { storeAppListingSubscriptionKey: "" },
       { storeAppListingSubscriptionKey: "k".repeat(MAX_PLAN_KEY_LENGTH + 1) },
+      { status: "FUTURE_STATUS" },
     ];
 
     for (const overrides of cases) {
@@ -237,7 +257,7 @@ describe("HttpIkasLicenceAdapter", () => {
     });
 
     await expect(
-      new HttpIkasLicenceAdapter("https://example.test/graphql", "token", fetchMock, 5).getMerchantLicence("app-install-1"),
+      new HttpIkasLicenceAdapter("https://example.test/graphql", "token", "store-app-1", fetchMock, 5).getMerchantLicence("app-install-1"),
     ).rejects.toThrow(new IkasUpstreamError("IKAS_UPSTREAM_HTTP_ERROR"));
 
     expect(captured).toBeInstanceOf(AbortSignal);
@@ -287,7 +307,8 @@ describe("HttpIkasLicenceAdapter", () => {
             appSubscriptions: [
               {
                 authorizedAppId: "app-install-1",
-                storeAppId: "sa1",
+                // This app's own listing, so a malformed payload here must reject rather than skip.
+                storeAppId: "store-app-1",
                 storeAppListingSubscriptionKey: "k",
                 status: "ACTIVE",
                 deleted: "false",

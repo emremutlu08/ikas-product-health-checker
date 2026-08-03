@@ -18,6 +18,11 @@ export type RuntimeEntitlementDependencies = {
   getToken: typeof getIkasToken;
   createReader(accessToken: string): LicenceReader;
   logger?: EntitlementLogger;
+  /**
+   * This app's listing id. Injected rather than read inside the resolver so a test states the
+   * identity it is asserting about instead of depending on process configuration.
+   */
+  storeAppId: string;
 };
 
 const defaultLogger: EntitlementLogger = {
@@ -29,9 +34,10 @@ const defaultLogger: EntitlementLogger = {
 };
 
 const defaultDependencies: RuntimeEntitlementDependencies = {
+  storeAppId: config.oauth.clientId ?? "",
   getToken: getIkasToken,
   createReader: (accessToken) =>
-    new HttpIkasLicenceAdapter(config.graphApiUrl, accessToken),
+    new HttpIkasLicenceAdapter(config.graphApiUrl, accessToken, config.oauth.clientId ?? ""),
   logger: defaultLogger,
 };
 
@@ -75,6 +81,8 @@ export async function resolveInstallationEntitlement(
     {
       authorizedAppId: installation.authorizedAppId,
       merchantId: installation.merchantId,
+      // Decides which subscription in the merchant's licence is a subscription to this app.
+      storeAppId: dependencies.storeAppId,
     },
     { logger: dependencies.logger },
   );

@@ -28,9 +28,12 @@ function licence(overrides: Partial<IkasMerchantLicence> = {}): IkasMerchantLice
         deleted: false,
       },
     ],
+    reportedSubscriptionCount: 1,
     ...overrides,
   };
 }
+
+const STORE_APP_ID = "store-app-1";
 
 function dependencies(result: IkasMerchantLicence | Error = licence()) {
   const reader = {
@@ -40,6 +43,7 @@ function dependencies(result: IkasMerchantLicence | Error = licence()) {
     }),
   };
   return {
+    storeAppId: STORE_APP_ID,
     getToken: vi.fn().mockResolvedValue(token),
     createReader: vi.fn().mockReturnValue(reader),
     logger: { warn: vi.fn() },

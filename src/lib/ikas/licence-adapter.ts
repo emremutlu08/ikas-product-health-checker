@@ -75,6 +75,12 @@ export type IkasAppSubscription = z.infer<typeof appSubscriptionSchema>;
 export type IkasMerchantLicence = {
   merchantId: string;
   appSubscriptions: IkasAppSubscription[];
+  /**
+   * How many subscriptions ikas returned, before any were parsed. A gap between this and
+   * `appSubscriptions.length` means records were skipped as malformed, which is the difference
+   * between "this merchant has no subscription" and "we could not read the one they have".
+   */
+  reportedSubscriptionCount: number;
 };
 
 export interface IkasLicenceAdapter {
@@ -100,6 +106,11 @@ export class HttpIkasLicenceAdapter implements IkasLicenceAdapter {
   constructor(
     private readonly endpoint: string,
     private readonly token: string,
+    /**
+     * This app's listing id. Only used to tell our own malformed record — which must fail loudly
+     * so the caller can grant grace — from another app's, which is simply not our business.
+     */
+    private readonly storeAppId: string,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = LICENCE_GRAPHQL_TIMEOUT_MS,
   ) {}
@@ -158,24 +169,46 @@ export class HttpIkasLicenceAdapter implements IkasLicenceAdapter {
       throw new IkasUpstreamError("IKAS_UPSTREAM_INVALID_RESPONSE");
     }
 
+    /**
+     * Every subscription the merchant holds is returned, unfiltered.
+     *
+     * This used to drop anything whose `authorizedAppId` did not equal the installation's — which
+     * silently discarded the real thing: ikas leaves that field `null` on a plan bought through
+     * "Planı Yönet", because no merchant app payment is involved. A paying merchant therefore
+     * arrived here with an empty list and no way to tell "never subscribed" from "we threw it
+     * away". Deciding which subscription belongs to this installation is the entitlement
+     * resolver's job, and it needs to see the candidates to do it.
+     */
+    /**
+     * Malformed data is fatal for this app's own subscription and ignorable for everyone else's.
+     *
+     * A merchant's licence lists every app they subscribe to. If one unrelated app's record
+     * drifts from the documented shape, rejecting the whole licence would deny this merchant a
+     * subscription they hold — an outage caused by someone else's data. But swallowing a
+     * malformed record of *ours* is worse in the other direction: an ikas enum change would read
+     * as "no subscription" and silently downgrade a paying merchant, instead of the unknown state
+     * that grants grace. So the listing id decides which of the two rules applies.
+     */
     const appSubscriptions: IkasAppSubscription[] = [];
     for (const candidate of parsed.data.appSubscriptions) {
-      if (
-        typeof candidate !== "object" ||
-        candidate === null ||
-        !("authorizedAppId" in candidate) ||
-        candidate.authorizedAppId !== authorizedAppId
-      ) {
+      const subscription = appSubscriptionSchema.safeParse(candidate);
+      if (subscription.success) {
+        appSubscriptions.push(subscription.data);
         continue;
       }
 
-      const subscription = appSubscriptionSchema.safeParse(candidate);
-      if (!subscription.success) {
-        throw new IkasUpstreamError("IKAS_UPSTREAM_INVALID_RESPONSE");
-      }
-      appSubscriptions.push(subscription.data);
+      const isOurs =
+        typeof candidate === "object" &&
+        candidate !== null &&
+        "storeAppId" in candidate &&
+        candidate.storeAppId === this.storeAppId;
+      if (isOurs) throw new IkasUpstreamError("IKAS_UPSTREAM_INVALID_RESPONSE");
     }
 
-    return { merchantId: parsed.data.merchantId, appSubscriptions };
+    return {
+      merchantId: parsed.data.merchantId,
+      appSubscriptions,
+      reportedSubscriptionCount: parsed.data.appSubscriptions.length,
+    };
   }
 }

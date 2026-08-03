@@ -63,6 +63,8 @@ export type EntitlementSubject = {
   authorizedAppId: string;
   /** The licence must belong to this merchant or nothing is granted. */
   merchantId: string;
+  /** This app's listing id — the ikas client id. Identifies which subscription is ours. */
+  storeAppId: string;
 };
 
 /** Structural subset of IkasLicenceAdapter, so callers can inject any licence source. */
@@ -95,8 +97,10 @@ export type NoEntitlementWarning = {
   reason: "MERCHANT_MISMATCH" | "NO_MATCHING_SUBSCRIPTION" | "SUBSCRIPTION_NOT_ACTIVE" | "INVALID_SUBJECT";
   authorizedAppId: string;
   merchantId: string | null;
-  /** Subscriptions the licence returned, before any of them were matched to this install. */
+  /** Subscriptions this app could read, before any of them were matched to this install. */
   subscriptionCount: number;
+  /** What ikas reported. A gap from `subscriptionCount` means records could not be read at all. */
+  reportedSubscriptionCount: number;
 };
 
 export type EntitlementLogger = {
@@ -128,12 +132,29 @@ function isValidTenantIdentifier(value: string) {
   );
 }
 
-function belongsToInstallation(subscription: IkasAppSubscription, authorizedAppId: string) {
-  // Exact authorizedAppId only. storeAppId identifies the listing, not this installation, so
-  // matching on it would hand one merchant's subscription to another merchant's install.
+/**
+ * Whether a subscription in this merchant's licence is a subscription to *this* app.
+ *
+ * The obvious field, `authorizedAppId`, is only populated when a merchant app payment created
+ * the subscription. A plan bought through "Planı Yönet" leaves it `null`, so matching on it alone
+ * refused every ordinary purchase — the exact failure this function was written to prevent, in
+ * reverse. `storeAppId` is the app listing and is always present, which is what actually answers
+ * the question.
+ *
+ * Matching on the listing is safe here and only here: the licence was fetched with this
+ * installation's own token, and `resolveEntitlement` refuses outright unless the licence's
+ * merchant is the subject's merchant. Both checks are load-bearing — drop either one and a
+ * listing id, which is public and identical for every merchant, would start granting Pro.
+ */
+function belongsToInstallation(
+  subscription: IkasAppSubscription,
+  subject: EntitlementSubject,
+) {
+  if (subscription.storeAppId === subject.storeAppId) return true;
+
   return (
     typeof subscription.authorizedAppId === "string" &&
-    subscription.authorizedAppId === authorizedAppId
+    subscription.authorizedAppId === subject.authorizedAppId
   );
 }
 
@@ -154,9 +175,12 @@ export function resolveEntitlement(
     merchantId: licence.merchantId,
   };
 
+  // storeAppId is validated with the rest: an unset app listing id would make the match below
+  // compare against `undefined`, and a missing binding must fail closed, not fall through.
   if (
     !isValidTenantIdentifier(subject.authorizedAppId) ||
-    !isValidTenantIdentifier(subject.merchantId)
+    !isValidTenantIdentifier(subject.merchantId) ||
+    !isValidTenantIdentifier(subject.storeAppId)
   ) {
     return { ...base, tier: "free", state: "denied", reason: "INVALID_SUBJECT" };
   }
@@ -167,7 +191,7 @@ export function resolveEntitlement(
   }
 
   const owned = licence.appSubscriptions.filter((subscription) =>
-    belongsToInstallation(subscription, subject.authorizedAppId),
+    belongsToInstallation(subscription, subject),
   );
   if (owned.length === 0) {
     return { ...base, tier: "free", state: "inactive", reason: "NO_MATCHING_SUBSCRIPTION" };
@@ -263,6 +287,7 @@ export async function resolveLiveEntitlement(
       authorizedAppId: entitlement.authorizedAppId,
       merchantId: entitlement.merchantId,
       subscriptionCount: licence.appSubscriptions.length,
+      reportedSubscriptionCount: licence.reportedSubscriptionCount,
     });
   }
 

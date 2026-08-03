@@ -14,7 +14,11 @@ import {
   type EntitlementSubject,
 } from "./entitlement-service";
 
-const INSTALLATION = { authorizedAppId: "app-install-1", merchantId: "merchant-1" };
+const INSTALLATION = {
+  authorizedAppId: "app-install-1",
+  merchantId: "merchant-1",
+  storeAppId: "store-app-1",
+};
 
 function subscription(overrides: Partial<IkasAppSubscription> = {}): IkasAppSubscription {
   return {
@@ -29,7 +33,11 @@ function subscription(overrides: Partial<IkasAppSubscription> = {}): IkasAppSubs
 }
 
 function licence(subscriptions: IkasAppSubscription[]): IkasMerchantLicence {
-  return { merchantId: "merchant-1", appSubscriptions: subscriptions };
+  return {
+    merchantId: "merchant-1",
+    appSubscriptions: subscriptions,
+    reportedSubscriptionCount: subscriptions.length,
+  };
 }
 
 describe("resolveEntitlement", () => {
@@ -54,12 +62,14 @@ describe("resolveEntitlement", () => {
     });
   });
 
-  it("never grants Pro from a subscription belonging to another installation", () => {
+  it("never grants Pro from a subscription to a different app", () => {
     const foreign = [
-      subscription({ authorizedAppId: "app-install-2" }),
-      subscription({ authorizedAppId: null }),
-      // storeAppId alone must not be treated as a match.
-      subscription({ authorizedAppId: undefined as unknown as string, storeAppId: "store-app-1" }),
+      subscription({ authorizedAppId: "app-install-2", storeAppId: "someone-elses-listing" }),
+      subscription({ authorizedAppId: null, storeAppId: "someone-elses-listing" }),
+      subscription({
+        authorizedAppId: undefined as unknown as string,
+        storeAppId: "someone-elses-listing",
+      }),
     ];
 
     for (const candidate of foreign) {
@@ -67,6 +77,54 @@ describe("resolveEntitlement", () => {
       expect(entitlement.tier, JSON.stringify(candidate)).toBe("free");
       expect(entitlement.reason).toBe("NO_MATCHING_SUBSCRIPTION");
     }
+  });
+
+  /**
+   * The shape ikas actually returns for a plan bought through "Planı Yönet": no merchant app
+   * payment is involved, so `authorizedAppId` is null and the app listing is the only thing
+   * identifying it. Requiring `authorizedAppId` refused every real purchase — a merchant paid,
+   * the licence said ACTIVE with our listing key, and the app served Free.
+   */
+  it("grants Pro when only the app listing identifies the subscription", () => {
+    const entitlement = resolveEntitlement(
+      licence([subscription({ authorizedAppId: null, storeAppId: "store-app-1" })]),
+      INSTALLATION,
+    );
+
+    expect(entitlement).toMatchObject({
+      tier: "pro",
+      state: "active",
+      reason: "ACTIVE_KNOWN_PLAN",
+      planKey: PRO_PLAN_KEY,
+    });
+  });
+
+  /**
+   * A listing id is public and identical for every merchant who installs the app, so it can only
+   * be trusted inside a licence already proven to be this merchant's. That check must stay ahead
+   * of the listing match, not behind it.
+   */
+  it("refuses a listing match when the licence belongs to another merchant", () => {
+    const otherMerchant = {
+      merchantId: "merchant-2",
+      appSubscriptions: [subscription({ authorizedAppId: null, storeAppId: "store-app-1" })],
+      reportedSubscriptionCount: 1,
+    };
+
+    expect(resolveEntitlement(otherMerchant, INSTALLATION)).toMatchObject({
+      tier: "free",
+      state: "denied",
+      reason: "MERCHANT_MISMATCH",
+    });
+  });
+
+  it("refuses to match anything when this app's own listing id is not configured", () => {
+    const entitlement = resolveEntitlement(
+      licence([subscription({ authorizedAppId: null, storeAppId: "store-app-1" })]),
+      { ...INSTALLATION, storeAppId: "" },
+    );
+
+    expect(entitlement).toMatchObject({ tier: "free", state: "denied", reason: "INVALID_SUBJECT" });
   });
 
   it("never grants Pro for a non-active, deleted, or unknown-key subscription", () => {
@@ -122,7 +180,7 @@ describe("resolveEntitlement", () => {
 
   it("refuses to resolve when the licence belongs to a different merchant", () => {
     const entitlement = resolveEntitlement(
-      { merchantId: "merchant-2", appSubscriptions: [subscription()] },
+      { merchantId: "merchant-2", appSubscriptions: [subscription()], reportedSubscriptionCount: [subscription()].length },
       INSTALLATION,
     );
 
@@ -140,10 +198,11 @@ describe("resolveEntitlement", () => {
   // must never reach any code path keyed on `unknown`.
   it("marks a cross-tenant answer terminal rather than retryable", () => {
     const mismatch = resolveEntitlement(
-      { merchantId: "merchant-2", appSubscriptions: [subscription()] },
+      { merchantId: "merchant-2", appSubscriptions: [subscription()], reportedSubscriptionCount: [subscription()].length },
       INSTALLATION,
     );
     const malformed = resolveEntitlement(licence([subscription()]), {
+      storeAppId: "store-app-1",
       authorizedAppId: "app-install-1",
       merchantId: "   ",
     });
@@ -158,10 +217,13 @@ describe("resolveEntitlement", () => {
 
   it("default-denies malformed tenant subjects even if an upstream record matches them", () => {
     for (const subject of [
-      { authorizedAppId: "", merchantId: "merchant-1" },
-      { authorizedAppId: "   ", merchantId: "merchant-1" },
-      { authorizedAppId: "app-install-1", merchantId: "" },
-      { authorizedAppId: "app-install-1", merchantId: "   " },
+      { ...INSTALLATION, authorizedAppId: "" },
+      { ...INSTALLATION, authorizedAppId: "   " },
+      { ...INSTALLATION, merchantId: "" },
+      { ...INSTALLATION, merchantId: "   " },
+      // The app's own listing id is a binding too: unset, it can only match by accident.
+      { ...INSTALLATION, storeAppId: "" },
+      { ...INSTALLATION, storeAppId: "   " },
     ]) {
       const matching = subscription({ authorizedAppId: subject.authorizedAppId });
       const entitlement = resolveEntitlement(licence([matching]), subject);
@@ -200,7 +262,11 @@ describe("resolveLiveEntitlement", () => {
     const getMerchantLicence = vi.fn();
 
     await expect(
-      resolveLiveEntitlement({ getMerchantLicence }, { authorizedAppId: "   ", merchantId: "merchant-1" }),
+      resolveLiveEntitlement({ getMerchantLicence }, {
+        authorizedAppId: "   ",
+        merchantId: "merchant-1",
+        storeAppId: "store-app-1",
+      }),
     ).resolves.toMatchObject({ tier: "free", state: "denied", reason: "INVALID_SUBJECT" });
     expect(getMerchantLicence).not.toHaveBeenCalled();
   });
@@ -248,7 +314,9 @@ describe("resolveLiveEntitlement", () => {
     },
     {
       name: "a subscription this installation cannot claim",
-      subscriptions: [subscription({ authorizedAppId: "someone-elses-install" })],
+      subscriptions: [
+        subscription({ authorizedAppId: "someone-elses-install", storeAppId: "another-listing" }),
+      ],
       reason: "NO_MATCHING_SUBSCRIPTION",
       subscriptionCount: 1,
     },
@@ -274,6 +342,7 @@ describe("resolveLiveEntitlement", () => {
       authorizedAppId: "app-install-1",
       merchantId: "merchant-1",
       subscriptionCount,
+      reportedSubscriptionCount: subscriptionCount,
     });
 
     const serialized = JSON.stringify(warn.mock.calls[0]![0]);
@@ -324,7 +393,7 @@ describe("resolveLiveEntitlement", () => {
         { status: 200 },
       ),
     );
-    const reader = new HttpIkasLicenceAdapter("https://example.test/graphql", "token", fetchMock);
+    const reader = new HttpIkasLicenceAdapter("https://example.test/graphql", "token", "store-app-1", fetchMock);
 
     const entitlement = await resolveLiveEntitlement(reader, INSTALLATION);
 
