@@ -112,6 +112,53 @@ describe("HttpIkasLicenceAdapter", () => {
     }
   });
 
+  /**
+   * The payload ikas actually returns for a plan bought through "Planı Yönet", captured from a
+   * live response on 2026-08-03 and frozen here verbatim.
+   *
+   * Every other fixture in this file was written from the schema and populated `authorizedAppId`,
+   * which the real response leaves null. That is why nothing here failed while production refused
+   * every paying merchant: the tests only ever described a shape we imagined. A fixture taken
+   * from the wire is the only kind that can contradict us.
+   */
+  it("accepts the shape a real 'Planı Yönet' purchase produces", async () => {
+    const live = {
+      data: {
+        getMerchantLicence: {
+          merchantId: "merchant-1",
+          appSubscriptions: [
+            {
+              id: "31f7362b-cb64-4d18-a6e0-3443abf3939e",
+              name: "Product Health Pro",
+              // Null on a listing purchase: no merchant app payment is involved.
+              authorizedAppId: null,
+              appPaymentKey: null,
+              storeAppId: "store-app-1",
+              storeAppListingSubscriptionKey: "productHealthPro",
+              status: "ACTIVE",
+              deleted: false,
+              currencyCode: "TRY",
+              lastPaymentPeriod: "YEARLY",
+              lastPaymentPrice: 0.94,
+            },
+          ],
+        },
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(live));
+
+    const licence = await adapter(fetchMock).getMerchantLicence("app-install-1");
+
+    expect(licence.reportedSubscriptionCount).toBe(1);
+    expect(licence.appSubscriptions).toHaveLength(1);
+    expect(licence.appSubscriptions[0]).toMatchObject({
+      authorizedAppId: null,
+      storeAppId: "store-app-1",
+      storeAppListingSubscriptionKey: "productHealthPro",
+      status: "ACTIVE",
+    });
+  });
+
   // A status outside the live enum is malformed upstream data, not a fourth business state.
   // Reading it as "not ACTIVE" would silently downgrade a merchant on an ikas schema change,
   // so the whole licence is rejected and the caller resolves it as unknown instead.

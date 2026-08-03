@@ -343,10 +343,40 @@ describe("resolveLiveEntitlement", () => {
       merchantId: "merchant-1",
       subscriptionCount,
       reportedSubscriptionCount: subscriptionCount,
+      candidates: expect.any(Array),
     });
 
     const serialized = JSON.stringify(warn.mock.calls[0]![0]);
     expect(serialized).not.toMatch(/token|bearer|authorization|password|secret/i);
+  });
+
+  /**
+   * The refusal has to describe the upstream record, not just our conclusion about it. Reporting
+   * only "no subscription" is what let a bug in this file be mistaken for a bug in ikas.
+   */
+  it("says which identifier failed to match, not merely that none did", async () => {
+    const warn = vi.fn();
+    const getMerchantLicence = vi
+      .fn()
+      .mockResolvedValue(
+        licence([subscription({ authorizedAppId: null, storeAppId: "another-listing" })]),
+      );
+
+    await resolveLiveEntitlement({ getMerchantLicence }, INSTALLATION, { logger: { warn } });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toMatchObject({
+      reason: "NO_MATCHING_SUBSCRIPTION",
+      candidates: [
+        {
+          storeAppIdMatches: false,
+          authorizedAppIdMatches: false,
+          authorizedAppIdIsNull: true,
+          status: "ACTIVE",
+          deleted: false,
+        },
+      ],
+    });
   });
 
   it("stays silent and pure for a resolvable licence", async () => {
@@ -401,6 +431,51 @@ describe("resolveLiveEntitlement", () => {
     expect(entitlement.reason).toBe("LICENCE_INVALID_RESPONSE");
     expect(entitlement.state).not.toBe("inactive");
     expect(entitlement.tier).toBe("free");
+  });
+
+  /**
+   * Adapter and resolver, together, against the payload ikas really sends.
+   *
+   * Both halves were individually covered and both were wrong in the same way: each filtered on
+   * `authorizedAppId`, which a listing purchase leaves null, so a paying merchant was refused
+   * twice over. Neither unit test could see it, because each one's fixture was written to match
+   * the code beside it. Only the whole chain, fed the real shape, can catch that class of bug.
+   */
+  it("grants Pro end to end for the payload a real purchase produces", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            getMerchantLicence: {
+              merchantId: "merchant-1",
+              appSubscriptions: [
+                {
+                  id: "31f7362b-cb64-4d18-a6e0-3443abf3939e",
+                  authorizedAppId: null,
+                  storeAppId: "store-app-1",
+                  storeAppListingSubscriptionKey: PRO_PLAN_KEY,
+                  status: "ACTIVE",
+                  deleted: false,
+                },
+              ],
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const reader = new HttpIkasLicenceAdapter(
+      "https://example.test/graphql",
+      "token",
+      "store-app-1",
+      fetchMock,
+    );
+
+    const warn = vi.fn();
+    const entitlement = await resolveLiveEntitlement(reader, INSTALLATION, { logger: { warn } });
+
+    expect(entitlement).toMatchObject({ tier: "pro", state: "active", reason: "ACTIVE_KNOWN_PLAN" });
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("classifies licence read failures without making auth or schema failures grace-eligible", async () => {

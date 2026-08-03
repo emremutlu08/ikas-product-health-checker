@@ -101,7 +101,33 @@ export type NoEntitlementWarning = {
   subscriptionCount: number;
   /** What ikas reported. A gap from `subscriptionCount` means records could not be read at all. */
   reportedSubscriptionCount: number;
+  /**
+   * Why each candidate failed to grant, bounded to a handful.
+   *
+   * The point is to describe the upstream record rather than our verdict on it. A refusal that
+   * only reports its own conclusion is what turned a bug in this file into a bug report filed
+   * against ikas: the number said "no subscription" when it meant "none survived our filter".
+   */
+  candidates: Array<{
+    storeAppIdMatches: boolean;
+    authorizedAppIdMatches: boolean;
+    authorizedAppIdIsNull: boolean;
+    status: string;
+    deleted: boolean;
+  }>;
 };
+
+const MAX_LOGGED_CANDIDATES = 5;
+
+function describeCandidates(licence: IkasMerchantLicence, subject: EntitlementSubject) {
+  return licence.appSubscriptions.slice(0, MAX_LOGGED_CANDIDATES).map((subscription) => ({
+    storeAppIdMatches: subscription.storeAppId === subject.storeAppId,
+    authorizedAppIdMatches: subscription.authorizedAppId === subject.authorizedAppId,
+    authorizedAppIdIsNull: subscription.authorizedAppId === null,
+    status: subscription.status,
+    deleted: subscription.deleted,
+  }));
+}
 
 export type EntitlementLogger = {
   warn(warning: UnknownPlanKeyWarning | NoEntitlementWarning): void;
@@ -288,6 +314,7 @@ export async function resolveLiveEntitlement(
       merchantId: entitlement.merchantId,
       subscriptionCount: licence.appSubscriptions.length,
       reportedSubscriptionCount: licence.reportedSubscriptionCount,
+      candidates: describeCandidates(licence, subject),
     });
   }
 
