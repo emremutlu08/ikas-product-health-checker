@@ -37,54 +37,32 @@ drops for a reason the merchant cannot find on screen is worse than no number at
 
 ## PRO
 
-| Promise | Status | What is missing |
+Pro is now resolved correctly — a store holding the plan is recognised as Pro (fixed in `405e108`,
+verified live on `dev-emre4` and `dev-emre2`). That opens the gates. It does not mean any of the
+promised behaviour has been seen to happen, and the two are recorded separately on purpose.
+
+| Promise | Gate | Observed working |
 | --- | --- | --- |
-| Günde bir kez otomatik tarama | **Runs, never scheduled anything** | The cron now answers 200 instead of refusing itself, but it has yet to schedule a single scan — see below. |
-| Tarama geçmişi ve sorun farkları | **Unproven live** | Implemented and Pro-gated. No store has ever held a Pro subscription, so this has never run against a real entitlement. |
-| Düşük stok eşiği ayarı | **Unproven live** | Same. |
-| Günlük e-posta özeti | **Half configured** | `RESEND_API_KEY` and `IKAS_EMAIL_FROM` now exist in Vercel Production, so `isDailySummaryEmailConfigured()` should pass. But the sender domain `mail.emre-mutlu.com.tr` is not yet verified in Resend, and Resend refuses to send from an unverified domain — so no summary reaches anyone yet. |
-| Düşük stok ve toparlanma bildirimleri | **Half configured** | Same transport, same gap. |
+| Günde bir kez otomatik tarama | Open | **No.** The hourly cron reports `scheduled: 0` on every run so far. It has never claimed an installation. |
+| Tarama geçmişi ve sorun farkları | Open | **No.** History only accumulates from scans taken while the store holds Pro; every scan so far was taken on the free option and stored latest-only. |
+| Düşük stok eşiği ayarı | Open | **No.** The settings surface has never been exercised with a Pro entitlement. |
+| Günlük e-posta özeti | **Closed** | **No.** `RESEND_API_KEY` and `IKAS_EMAIL_FROM` are set, but `mail.emre-mutlu.com.tr` is unverified in Resend, so nothing can be sent. |
+| Düşük stok ve toparlanma bildirimleri | **Closed** | **No.** Same transport, same gap. |
 
-### How the scheduler flag was read without reading the secret — 2026-07-29
+### What the plan screen may and may not claim — 2026-08-03
 
-`/api/internal/monitoring/daily` answers in a fixed order: a missing or wrong-length `CRON_SECRET`
-gives 503, an unauthorized caller gives 401, and only then a scheduler flag that is not `"true"`
-gives 503.
+The capability badge is derived from configuration: `rolloutOf` reads feature flags and, for
+history and the low-stock threshold, returns `available` unconditionally. It has no knowledge of
+whether anything ever ran.
 
-Production logs show both outcomes minutes apart:
+Beside it, the page told merchants that a capability is marked so *only once verified working in
+production*. Three capabilities that had never executed once carried that badge. The claim was
+removed in `696bb9a`; the label now reads "Planınızda açık" and the copy describes plan and setup
+state rather than observed behaviour. A test pins both, because wording was the entire safeguard
+and it had drifted with nothing to stop it.
 
-```text
-/api/internal/monitoring/daily  ->  503   Vercel cron, deployment URL, cache BYPASS
-/api/internal/monitoring/daily  ->  401   unauthenticated probe from outside
-```
-
-The 401 proves the secret check passes, because an invalid secret would have answered 503 before
-authorization was ever considered. So the cron's own 503 can only come from the last check, and
-`IKAS_MONITORING_SCHEDULER_ENABLED` is not `"true"`. No environment variable was decrypted or
-downloaded to establish this.
-
-### The scheduler after the flag was set — 2026-07-28
-
-`IKAS_MONITORING_SCHEDULER_ENABLED` was set to `true` and production redeployed. The 23:00 UTC cron
-answered 200:
-
-```json
-{"event":"ikas_daily_monitoring","outcome":"completed","inspected":1,
- "claimed":0,"scheduled":0,"completed":0,"sent":0,"emailSkipped":0,
- "alertsSent":0,"alertsFailed":0,"busy":0,"failed":0}
-```
-
-That proves the flag took and the endpoint no longer refuses itself. It does **not** prove the
-promise. `claimed: 0, scheduled: 0` means the one installation it inspected was passed over,
-because automatic scanning is Pro-gated and `dev-emre2` is on the free option. The scheduled-scan
-path itself is still unexercised, and will stay that way until a store holds a real Pro
-entitlement. `sent: 0` likewise means no email was even attempted, so this run says nothing about
-the email transport.
-
-Nobody is harmed by the last four today: no store can subscribe to Pro yet, because ikas does not
-support switching an installed store from the free option to a paid plan
-("Mağazaların aktif planlarını değiştirme özelliği henüz mevcut değildir"). But the promises are in
-the submitted listing, so they must be closed before the first Pro subscription exists.
+If a badge is ever to mean "this ran", it needs a durable first-successful-run record to read. That
+is not built, and until it is, the screen must not imply otherwise.
 
 ## Safety claims
 
@@ -94,21 +72,16 @@ the submitted listing, so they must be closed before the first Pro subscription 
 | "Ürün kataloğunuz e-postayla paylaşılmaz" | Kept | The daily summary body carries only score, state, counts and a `/history` link; no product name or identifier is ever included |
 | "Düzeltme… geri alma imkânı sunar" | Kept, with a stated limit | A correction that filled a blank SKU is explicitly **not** offered as undoable, because writing a SKU back to empty has no proven inverse |
 
-## Open gates before the first Pro subscription
+## Open gates before the first paying merchant
 
-1. **Sender domain.** Verify `mail.emre-mutlu.com.tr` in Resend by publishing the MX and the two TXT
-   records it issues. The API key and the from-address are already in Vercel Production; the domain
-   is the only thing left, and Resend rejects every send until it is verified. Alternatively, drop
-   the two email promises from the plan description.
-2. **A scheduled scan that actually runs.** The cron is alive and returns 200, but it has never
-   claimed an installation, because the only installed store is on the free option. This closes
-   only once a Pro store exists and a run reports `scheduled: 1` or more.
-3. **Multi-variant canary.** The recorded canary ran against a single-variant product, so
-   `updateProduct` writing one variant has never been proven to leave *sibling variants* alone.
-   Blocked on a live development token — the stored `dev-emre2` token now returns `LOGIN_REQUIRED`,
-   and `dev-emre2` has no variant with a SKU to use as a rollback baseline.
-4. **Live Pro run.** No store is available for this yet. `dev-emre2` and `dev-emremutlu` already
-   have the app installed under the free option, and ikas does not let an installed store change
-   plan; ikas has asked that `dev-emre3` be left untouched. A store must be agreed with ikas, then
-   the app installed there choosing a paid plan *at install time*, before `getMerchantLicence` can
-   be checked for a recognised `storeAppListingSubscriptionKey` and any write flag opened.
+1. **Sender domain.** Verify `mail.emre-mutlu.com.tr` in Resend by publishing the MX and two TXT
+   records it issues. Everything else for email is already configured. Closes when a cron run
+   reports `sent: 1`.
+2. **A scheduled scan that actually runs.** Closes when an hourly run reports `scheduled: 1` or
+   more. That same run also produces the first stored history entry, which closes the history and
+   diff promise with it.
+3. **The low-stock threshold, exercised.** Set a threshold on a Pro store and confirm the next scan
+   honours it.
+4. **Multi-variant canary.** `updateProduct` writing one variant has never been proven to leave
+   sibling variants alone. Needs a baseline SKU on a multi-variant product in `dev-emre2` and a
+   live development token. `IKAS_PRODUCT_WRITES_ENABLED` stays closed until this is recorded here.
