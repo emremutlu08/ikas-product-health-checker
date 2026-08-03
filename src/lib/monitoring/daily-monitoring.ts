@@ -42,6 +42,15 @@ export const MONITORING_RUN_LEASE_TTL_MS = 20 * 60 * 1000;
 export type DailyMonitoringResult = {
   inspected: number;
   claimed: number;
+  /**
+   * Why an inspected installation was passed over.
+   *
+   * The loop below skips on two conditions and used to report neither, so a run that scheduled
+   * nothing looked identical whether monitoring was unavailable for every store or every store had
+   * simply run recently. A summary that only counts what happened cannot explain what did not.
+   */
+  skippedNoSettings: number;
+  skippedNotDue: number;
   scheduled: number;
   completed: number;
   sent: number;
@@ -256,6 +265,8 @@ export async function runDailyMonitoring(
   const result: DailyMonitoringResult = {
     inspected: 0,
     claimed: 0,
+    skippedNoSettings: 0,
+    skippedNotDue: 0,
     scheduled: 0,
     completed: 0,
     sent: 0,
@@ -279,7 +290,10 @@ export async function runDailyMonitoring(
     result.inspected += 1;
     try {
       const settings = await dependencies.resolveMonitoring(installation);
-      if (!settings) continue;
+      if (!settings) {
+        result.skippedNoSettings += 1;
+        continue;
+      }
       // One consent covers both messages: a merchant who never turned e-mail on is not mailed
       // just because they configured a threshold.
       const recipient = settings.dailyEmailEnabled
@@ -292,7 +306,10 @@ export async function runDailyMonitoring(
         MONITORING_INTERVAL_MS,
         MONITORING_RUN_LEASE_TTL_MS,
       );
-      if (!claim) continue;
+      if (!claim) {
+        result.skippedNotDue += 1;
+        continue;
+      }
       result.claimed += 1;
       selected.push({ installation, ...(recipient ? { recipient } : {}), settings, claim });
     } catch {

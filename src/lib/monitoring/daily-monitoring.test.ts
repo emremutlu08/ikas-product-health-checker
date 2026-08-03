@@ -104,6 +104,8 @@ describe("daily monitoring scheduler", () => {
     expect(result).toEqual({
       inspected: 7,
       claimed: 6,
+      skippedNoSettings: 1,
+      skippedNotDue: 0,
       scheduled: 6,
       completed: 6,
       sent: 4,
@@ -154,6 +156,8 @@ describe("daily monitoring scheduler", () => {
     expect(result).toEqual({
       inspected: 4,
       claimed: 4,
+      skippedNoSettings: 0,
+      skippedNotDue: 0,
       scheduled: 4,
       completed: 2,
       sent: 2,
@@ -245,6 +249,8 @@ describe("daily monitoring scheduler", () => {
     expect(result).toEqual({
       inspected: 8,
       claimed: 0,
+      skippedNoSettings: 0,
+      skippedNotDue: 8,
       scheduled: 0,
       completed: 0,
       sent: 0,
@@ -354,5 +360,26 @@ describe("low-stock alert delivery", () => {
     expect(result.completed).toBe(1);
     expect(result.alertsFailed).toBe(1);
     expect(result.failed).toBe(0);
+  });
+});
+
+/**
+ * A run that schedules nothing is the case an operator actually has to explain, and it was the one
+ * the summary said least about. Two different causes — monitoring unavailable, or nothing due yet —
+ * produced byte-identical output, which cost a full hour of guessing per hypothesis in production.
+ */
+describe("a run that schedules nothing", () => {
+  it("distinguishes monitoring being unavailable from nothing being due", async () => {
+    const unavailable = await runDailyMonitoring(
+      fixture({ resolveMonitoring: vi.fn().mockResolvedValue(undefined) }),
+    );
+    const notDue = await runDailyMonitoring(
+      fixture({ claimIfDue: vi.fn().mockResolvedValue(undefined) }),
+    );
+
+    expect(unavailable).toMatchObject({ scheduled: 0, skippedNotDue: 0 });
+    expect(unavailable.skippedNoSettings).toBe(unavailable.inspected);
+    expect(notDue).toMatchObject({ scheduled: 0, skippedNoSettings: 0 });
+    expect(notDue.skippedNotDue).toBe(notDue.inspected);
   });
 });
