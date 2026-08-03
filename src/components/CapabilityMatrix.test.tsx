@@ -81,3 +81,18 @@ describe("CapabilityMatrix", () => {
     expect(html).toContain("Plan doğrulanamadı");
   });
 });
+
+/**
+ * The explanatory paragraph is merchant-facing copy about our own honesty, so it is pinned like a
+ * contract. It previously told merchants a badge appears only after a feature is verified working
+ * in production, which the code has never been able to determine.
+ */
+describe("capability matrix copy", () => {
+  it("never claims a capability was verified running in production", () => {
+    const html = render({ tier: "pro", state: "active" });
+
+    expect(html).toContain("Planınızda açık");
+    expect(html).not.toMatch(/üretimde\s+çalıştığı\s+doğruland/);
+    expect(html).not.toContain("Kullanımda");
+  });
+});

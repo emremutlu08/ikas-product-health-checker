@@ -160,8 +160,18 @@ function rolloutOf(feature: AppFeature, signals: RolloutSignals): CapabilityRoll
   }
 }
 
-const ROLLOUT_LABEL: Record<CapabilityRollout, string> = {
-  available: "Kullanımda",
+/**
+ * These labels describe configuration, and must not be worded as though they described observed
+ * behaviour. `available` used to read "Kullanımda" — in use — next to a paragraph promising that
+ * the badge only appears once a feature is verified working in production. Nothing in this file
+ * knows whether anything ran: `rolloutOf` reads flags and constants. Three capabilities that had
+ * never executed once were being shown to merchants as verified.
+ *
+ * If a badge is ever to mean "this ran", it needs a durable record of a first successful run to
+ * read. Until then it says what it actually knows.
+ */
+export const ROLLOUT_LABEL: Record<CapabilityRollout, string> = {
+  available: "Planınızda açık",
   beta: "Beta",
   development_store_only: "Geliştirme mağazasıyla sınırlı",
   needs_configuration: "Kapalı — kurulum gerekiyor",

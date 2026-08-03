@@ -45,10 +45,11 @@ export function CapabilityMatrix({ matrix }: CapabilityMatrixProps) {
           Free ve PRO karşılaştırması
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
-          Aşağıdaki liste uygulamanın gerçek durumunu gösterir. Bir özellik yalnızca üretimde
-          çalıştığı doğrulandığında <strong>Kullanımda</strong> olarak işaretlenir; doğrulaması
-          tamamlanmamış özellikler açıkça beta, kapalı veya geliştirme mağazasıyla sınırlı olarak
-          belirtilir.
+          Aşağıdaki liste her yeteneğin planınızda ve bu kurulumda hangi durumda olduğunu gösterir.{" "}
+          <strong>Planınızda açık</strong> demek, yetenek planınıza dahildir ve kurulumu
+          tamamlanmıştır demektir; ilk kez kullandığınızda çalışır. Kurulumu tamamlanmamış olanlar
+          kapalı, henüz olgunlaşmamış olanlar beta, üretimde açılmamış olanlar geliştirme
+          mağazasıyla sınırlı olarak belirtilir.
         </p>
         <p className="mt-2 text-sm text-text-muted">
           {matrix.entitlementActive

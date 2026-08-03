@@ -5,6 +5,7 @@ import {
   catalogCoversEveryFeature,
   resolveCapabilityMatrix,
   type RolloutSignals,
+  ROLLOUT_LABEL,
 } from "./capability-catalog";
 
 const activePro = { tier: "pro", state: "active" } as const;
@@ -152,5 +153,22 @@ describe("resolveCapabilityMatrix", () => {
       ["csv-export", "health-dashboard", "manual-scan"].sort(),
     );
     for (const row of free) expect(row.usableNow, row.feature).toBe(true);
+  });
+});
+
+/**
+ * The badge is derived from flags and constants, so its wording may not imply that anything was
+ * observed running. It once read "Kullanımda" beside a paragraph claiming a feature is only marked
+ * so after being verified in production — while three capabilities that had never executed carried
+ * it. Wording is the whole safeguard here; without a test it drifted back into a claim.
+ */
+describe("capability status wording", () => {
+  it("describes configuration, never observed behaviour", () => {
+    const labels = Object.values(ROLLOUT_LABEL);
+
+    expect(labels).toContain("Planınızda açık");
+    for (const label of labels) {
+      expect(label, label).not.toMatch(/kullanımda|çalışıyor|doğruland|test edildi/i);
+    }
   });
 });
