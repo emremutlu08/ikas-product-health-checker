@@ -44,7 +44,7 @@ promised behaviour has been seen to happen, and the two are recorded separately 
 | Promise | Gate | Observed working |
 | --- | --- | --- |
 | Günde bir kez otomatik tarama | Open | **Yes** — see below. |
-| Tarama geçmişi ve sorun farkları | Open | **Partly.** The scheduled runs above were taken under Pro, so they are retained rather than latest-only. The history surface itself has not been opened and compared yet. |
+| Tarama geçmişi ve sorun farkları | Open | **Half.** The history surface renders and holds the retained scheduled scan (`04.08.2026 10:00`, 31 products). It holds exactly one entry, so the *diff* half of the promise cannot be shown until a second scan lands. |
 | Düşük stok eşiği ayarı | Open | **No.** The settings surface has never been exercised with a Pro entitlement. |
 | Günlük e-posta özeti | **Closed** | **No.** `RESEND_API_KEY` and `IKAS_EMAIL_FROM` are set, but `mail.emre-mutlu.com.tr` is unverified in Resend, so nothing can be sent. |
 | Düşük stok ve toparlanma bildirimleri | **Closed** | **No.** Same transport, same gap. |
@@ -97,7 +97,8 @@ is not built, and until it is, the screen must not imply otherwise.
    records it issues. Everything else for email is already configured. Closes when a cron run
    reports `sent: 1`.
 2. ~~**A scheduled scan that actually runs.**~~ Closed 2026-08-04: `scheduled: 2, completed: 2`.
-   What remains is opening the history surface and confirming two retained scans compare correctly.
+   History retains it and the surface renders it. What remains is the comparison: with one entry
+   there is nothing to diff against, so this closes on the second scheduled scan.
 3. **The low-stock threshold, exercised.** Set a threshold on a Pro store and confirm the next scan
    honours it.
 4. **Multi-variant canary.** `updateProduct` writing one variant has never been proven to leave
