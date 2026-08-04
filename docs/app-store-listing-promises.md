@@ -43,11 +43,30 @@ promised behaviour has been seen to happen, and the two are recorded separately 
 
 | Promise | Gate | Observed working |
 | --- | --- | --- |
-| Günde bir kez otomatik tarama | Open | **No.** The hourly cron reports `scheduled: 0` on every run so far. It has never claimed an installation. |
-| Tarama geçmişi ve sorun farkları | Open | **No.** History only accumulates from scans taken while the store holds Pro; every scan so far was taken on the free option and stored latest-only. |
+| Günde bir kez otomatik tarama | Open | **Yes** — see below. |
+| Tarama geçmişi ve sorun farkları | Open | **Partly.** The scheduled runs above were taken under Pro, so they are retained rather than latest-only. The history surface itself has not been opened and compared yet. |
 | Düşük stok eşiği ayarı | Open | **No.** The settings surface has never been exercised with a Pro entitlement. |
 | Günlük e-posta özeti | **Closed** | **No.** `RESEND_API_KEY` and `IKAS_EMAIL_FROM` are set, but `mail.emre-mutlu.com.tr` is unverified in Resend, so nothing can be sent. |
 | Düşük stok ve toparlanma bildirimleri | **Closed** | **No.** Same transport, same gap. |
+
+### The scheduled scan, proven — 2026-08-04
+
+```
+08-04 10:00:28  claimed=2  scheduled=2  completed=2  sent=0  failed=0
+```
+
+Both installations were claimed, scanned and completed by the hourly cron, with no human involved.
+`dev-emre4`'s dashboard independently shows `Son tarama: 04.08.2026 10:00`, matching that run.
+
+Every other hour that day reported `skippedNotDue: 2`, which is the scheduler working as designed:
+`MONITORING_INTERVAL_MS` is 23 hours, so a store scanned at 10:00 is not due again until the next
+morning. That reading was only available because the run summary now names its skip reasons; before
+that, twenty correct runs and a broken one produced identical output.
+
+A caution for the next person reading production logs here: `vercel logs` retains roughly the last
+four hours. A daily job is invisible in that window for most of the day, and its absence from the
+log is not evidence that it did not run. Two hours were spent chasing an anomaly that was only a
+gap in retention.
 
 ### What the plan screen may and may not claim — 2026-08-03
 
@@ -77,9 +96,8 @@ is not built, and until it is, the screen must not imply otherwise.
 1. **Sender domain.** Verify `mail.emre-mutlu.com.tr` in Resend by publishing the MX and two TXT
    records it issues. Everything else for email is already configured. Closes when a cron run
    reports `sent: 1`.
-2. **A scheduled scan that actually runs.** Closes when an hourly run reports `scheduled: 1` or
-   more. That same run also produces the first stored history entry, which closes the history and
-   diff promise with it.
+2. ~~**A scheduled scan that actually runs.**~~ Closed 2026-08-04: `scheduled: 2, completed: 2`.
+   What remains is opening the history surface and confirming two retained scans compare correctly.
 3. **The low-stock threshold, exercised.** Set a threshold on a Pro store and confirm the next scan
    honours it.
 4. **Multi-variant canary.** `updateProduct` writing one variant has never been proven to leave
