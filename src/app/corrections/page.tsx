@@ -1,4 +1,9 @@
 import { CorrectionPanel, type CorrectableTarget } from "@/components/CorrectionPanel";
+import {
+  buildCorrectionHref,
+  parseCorrectionQuery,
+  selectCorrections,
+} from "@/lib/mutations/correction-list";
 import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
 import { resolveCapabilityMatrix } from "@/lib/billing/capability-catalog";
 import { resolveRolloutSignals } from "@/lib/billing/rollout-signals";
@@ -75,7 +80,14 @@ function Shell({ children, storeName }: { children: React.ReactNode; storeName?:
   );
 }
 
-export default async function CorrectionsPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function CorrectionsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<SearchParams>;
+}) {
+  const params = (await searchParams) ?? {};
   const installation = readInstallationSession(await getSession());
   if (!installation) {
     return (
@@ -167,6 +179,11 @@ export default async function CorrectionsPage() {
     });
   }
 
+  // Search and pagination run here rather than in the browser, so one page of work crosses the
+  // wire instead of the whole catalog's worth of correctable variants.
+  const query = parseCorrectionQuery(params);
+  const selection = selectCorrections(targets, query);
+
   return (
     <Shell storeName={installation.storeName}>
       <p className="rounded-md border border-border bg-surface-sunken px-4 py-3 text-sm leading-6 text-text">
@@ -174,7 +191,12 @@ export default async function CorrectionsPage() {
         açık onayınızdan sonra uygulanır, sonra ikas&apos;tan yeniden okunarak doğrulanır ve diğer
         alanların değişmediği kontrol edilir.
       </p>
-      <CorrectionPanel targets={targets} />
+      <CorrectionPanel
+        buildHref={(patch) => buildCorrectionHref(query, patch)}
+        query={query}
+        selection={selection}
+        targets={selection.targets}
+      />
     </Shell>
   );
 }

@@ -18,9 +18,37 @@ const target: CorrectableTarget = {
   imageLabel: "CL",
 };
 
+
+/**
+ * The panel no longer filters or slices — the server hands it one page. These helpers build the
+ * selection a server would have produced, so a test states the page it is rendering.
+ */
+function panel(targets: CorrectableTarget[], search = "") {
+  const selection = {
+    targets,
+    totalTargets: targets.length,
+    unfilteredTargets: targets.length,
+    page: 1,
+    pageCount: 1,
+    rangeStart: targets.length === 0 ? 0 : 1,
+    rangeEnd: targets.length,
+  };
+
+  return (
+    <CorrectionPanel
+      buildHref={(patch) => `/corrections?${new URLSearchParams(
+        Object.entries(patch).filter((entry): entry is [string, string] => Boolean(entry[1])),
+      ).toString()}`}
+      query={{ search, page: 1 }}
+      selection={selection}
+      targets={targets}
+    />
+  );
+}
+
 describe("CorrectionPanel", () => {
   it("labels its input and shows the current value before anything is typed", () => {
-    const html = renderToStaticMarkup(<CorrectionPanel targets={[target]} />);
+    const html = renderToStaticMarkup(panel([target]));
 
     expect(html).toContain('for="correction-variant-1-sku_change"');
     expect(html).toContain('id="correction-variant-1-sku_change"');
@@ -29,34 +57,32 @@ describe("CorrectionPanel", () => {
   });
 
   it("promises on screen that a preview changes nothing", () => {
-    const html = renderToStaticMarkup(<CorrectionPanel targets={[target]} />);
+    const html = renderToStaticMarkup(panel([target]));
 
     expect(html).toContain("Önizleme hiçbir şey değiştirmez");
     expect(html).toContain("açık onayınızdan sonra uygulanır");
   });
 
   it("renders no confirmation dialog until a preview exists", () => {
-    const html = renderToStaticMarkup(<CorrectionPanel targets={[target]} />);
+    const html = renderToStaticMarkup(panel([target]));
 
     expect(html).not.toContain('role="dialog"');
     expect(html).not.toContain("Onayla ve uygula");
   });
 
   it("says so plainly when the scan found nothing correctable", () => {
-    expect(renderToStaticMarkup(<CorrectionPanel targets={[]} />)).toContain(
+    expect(renderToStaticMarkup(panel([]))).toContain(
       "düzeltilebilir bir sorun bulunmadı",
     );
   });
 
   it("gives each correction kind its own field label", () => {
     const html = renderToStaticMarkup(
-      <CorrectionPanel
-        targets={[
-          target,
-          { ...target, variantId: "variant-2", kind: "price_change", currentValue: "199.9" },
-          { ...target, variantId: "variant-3", kind: "stock_change", currentValue: "0" },
-        ]}
-      />,
+      panel([
+        target,
+        { ...target, variantId: "variant-2", kind: "price_change", currentValue: "199.9" },
+        { ...target, variantId: "variant-3", kind: "stock_change", currentValue: "0" },
+      ]),
     );
 
     expect(html).toContain("Yeni SKU");
@@ -109,12 +135,27 @@ describe("correctionErrorMessage", () => {
  * something rather than silently hiding rows.
  */
 describe("CorrectionPanel search", () => {
-  it("offers a labelled search field and states how much is on screen", () => {
-    const html = renderToStaticMarkup(<CorrectionPanel targets={[target]} />);
+  /**
+   * The search is a GET form, not client state, because the server does the filtering: the result
+   * has to be a real URL that survives a reload and can be linked.
+   */
+  it("offers a labelled search field that submits to the server", () => {
+    const html = renderToStaticMarkup(panel([target]));
 
     expect(html).toContain("Ürün ara");
-    expect(html).toContain("1 düzeltme gösteriliyor.");
     expect(html).toContain('type="search"');
+    expect(html).toContain('method="get"');
+    expect(html).toContain('action="/corrections"');
+  });
+
+  /**
+   * The range is what tells a merchant they are looking at part of a larger list. Without it,
+   * page one of six is indistinguishable from the whole set.
+   */
+  it("states which slice of the results is on screen", () => {
+    const html = renderToStaticMarkup(panel([target]));
+
+    expect(html).toContain("1–1 / 1 düzeltme");
   });
 
   it("shows the product image beside each correction", () => {
@@ -123,13 +164,13 @@ describe("CorrectionPanel search", () => {
       imageSrc: "https://cdn.example.test/sleeve.webp",
     };
 
-    const html = renderToStaticMarkup(<CorrectionPanel targets={[withImage]} />);
+    const html = renderToStaticMarkup(panel([withImage]));
 
     expect(html).toContain("https://cdn.example.test/sleeve.webp");
   });
 
   it("falls back to initials rather than an empty tile when there is no image", () => {
-    const html = renderToStaticMarkup(<CorrectionPanel targets={[target]} />);
+    const html = renderToStaticMarkup(panel([target]));
 
     expect(html).toContain("CL");
     expect(html).not.toContain("<img");

@@ -78,8 +78,8 @@ const snapshot = {
   },
 };
 
-async function render() {
-  return renderToStaticMarkup(await CorrectionsPage());
+async function render(params: Record<string, string> = {}) {
+  return renderToStaticMarkup(await CorrectionsPage({ searchParams: Promise.resolve(params) }));
 }
 
 beforeEach(() => {
@@ -135,6 +135,30 @@ describe("corrections page", () => {
     const html = await render();
 
     expect(html).toContain("https://cdn.example.test/product-1.webp");
+  });
+
+  /**
+   * Search and pagination are resolved before anything is rendered, so a large catalog sends one
+   * page of work over the wire instead of every correctable variant it happens to have.
+   */
+  it("filters on the server rather than shipping everything for the browser to hide", async () => {
+    mocks.resolveRolloutSignals.mockReturnValue({ ...signals, productWritesEnabled: true });
+
+    const matched = await render({ q: "classic" });
+    expect(matched).toContain("Classic Laptop Sleeve");
+
+    const missed = await render({ q: "bulunmayan ürün" });
+    expect(missed).not.toContain("Classic Laptop Sleeve");
+    expect(missed).toContain("Aramanızla eşleşen düzeltme yok.");
+  });
+
+  it("keeps the search in the URL so a filtered view can be reloaded and linked", async () => {
+    mocks.resolveRolloutSignals.mockReturnValue({ ...signals, productWritesEnabled: true });
+
+    const html = await render({ q: "classic" });
+
+    expect(html).toContain('value="classic"');
+    expect(html).toContain('action="/corrections"');
   });
 
   it("states the safety contract on the page itself", async () => {

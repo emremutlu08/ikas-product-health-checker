@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { ProductImagePreview } from "./ProductImagePreview";
 import {
@@ -9,6 +9,7 @@ import {
   correctionErrorMessage,
 } from "@/lib/mutations/correction-messages";
 import type { MutationOperationKind } from "@/lib/mutations/mutation-operation";
+import type { CorrectionQuery, CorrectionSelection } from "@/lib/mutations/correction-list";
 
 /**
  * The merchant-facing correction flow.
@@ -54,9 +55,16 @@ function displayValue(value: unknown) {
   return String(value);
 }
 
-export function CorrectionPanel({ targets }: { targets: CorrectableTarget[] }) {
+export type CorrectionPanelProps = {
+  /** One server-selected page of targets. The component never filters or slices. */
+  targets: CorrectableTarget[];
+  selection: CorrectionSelection;
+  query: CorrectionQuery;
+  buildHref(patch: Record<string, string | undefined>): string;
+};
+
+export function CorrectionPanel({ targets, selection, query, buildHref }: CorrectionPanelProps) {
   const [selected, setSelected] = useState<CorrectableTarget | undefined>();
-  const [query, setQuery] = useState("");
   /** One value per row, so typing in one correction never disturbs another. */
   const [values, setValues] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<PreviewState | undefined>();
@@ -147,22 +155,7 @@ export function CorrectionPanel({ targets }: { targets: CorrectableTarget[] }) {
     reset();
   }
 
-  /**
-   * Matched against product and variant name only. A merchant arriving here already knows which
-   * product they came to fix, and a scan can list hundreds of variants — without this the screen
-   * is a scroll hunt. Normalised with a Turkish locale so "İ" and "ı" behave the way a Turkish
-   * keyboard produces them.
-   */
-  const normalise = (value: string) => value.toLocaleLowerCase("tr-TR").trim();
-  const visibleTargets = useMemo(() => {
-    const needle = normalise(query);
-    if (!needle) return targets;
-    return targets.filter((target) =>
-      normalise(`${target.productName} ${target.variantLabel ?? ""}`).includes(needle),
-    );
-  }, [targets, query]);
-
-  if (targets.length === 0) {
+  if (selection.unfilteredTargets === 0) {
     return (
       <p className="rounded-md border border-border bg-surface-sunken px-4 py-3 text-sm text-text-muted">
         Son taramada düzeltilebilir bir sorun bulunmadı.
@@ -185,33 +178,50 @@ export function CorrectionPanel({ targets }: { targets: CorrectableTarget[] }) {
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium text-text" htmlFor={`${searchId}-search`}>
-          Ürün ara
-        </label>
-        <input
-          className="min-h-11 w-full max-w-md rounded-md border border-border-strong bg-surface px-3 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          id={`${searchId}-search`}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Ürün veya varyant adı"
-          type="search"
-          value={query}
-        />
-        <p aria-live="polite" className="text-sm text-text-muted">
-          {query
-            ? `${visibleTargets.length} / ${targets.length} düzeltme gösteriliyor.`
-            : `${targets.length} düzeltme gösteriliyor.`}
-        </p>
-      </div>
+      {/*
+        A GET form, not client state: the server does the filtering, so the result is a real URL
+        that survives a reload and can be linked. Submitting always returns to page one, because
+        page 4 of the previous result set is almost never a page of the new one.
+      */}
+      <form action="/corrections" className="flex flex-wrap items-end gap-2" method="get">
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-text" htmlFor={`${searchId}-search`}>
+            Ürün ara
+          </label>
+          <input
+            className="min-h-11 w-full min-w-0 rounded-md border border-border-strong bg-surface px-3 text-sm text-text placeholder:text-text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:w-72"
+            defaultValue={query.search}
+            id={`${searchId}-search`}
+            name="q"
+            placeholder="Ürün veya varyant adı"
+            type="search"
+          />
+        </div>
+        <button
+          className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-4 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover"
+          type="submit"
+        >
+          Ara
+        </button>
+        {query.search ? (
+          <a
+            className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
+            href={buildHref({ q: undefined, page: undefined })}
+          >
+            Temizle
+          </a>
+        ) : null}
+      </form>
 
-      {visibleTargets.length === 0 ? (
-        <p className="rounded-md border border-border bg-surface-sunken px-4 py-3 text-sm text-text-muted">
-          Aramanızla eşleşen düzeltme yok. Aramayı temizleyerek hepsini görebilirsiniz.
-        </p>
-      ) : null}
+      <p className="text-sm text-text-muted">
+        {selection.totalTargets === 0
+          ? "Aramanızla eşleşen düzeltme yok."
+          : `${selection.rangeStart}–${selection.rangeEnd} / ${selection.totalTargets} düzeltme` +
+            (query.search ? ` (toplam ${selection.unfilteredTargets})` : "")}
+      </p>
 
       <ul className="flex flex-col gap-3">
-        {visibleTargets.map((target) => (
+        {targets.map((target) => (
           <li
             className="rounded-lg border border-border bg-surface p-4"
             key={targetKey(target)}
@@ -286,6 +296,44 @@ export function CorrectionPanel({ targets }: { targets: CorrectableTarget[] }) {
           </li>
         ))}
       </ul>
+
+      {selection.pageCount > 1 ? (
+        <nav aria-label="Sayfalama" className="flex flex-wrap items-center gap-2">
+          {selection.page > 1 ? (
+            <a
+              className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
+              href={buildHref({ page: String(selection.page - 1) })}
+            >
+              Önceki
+            </a>
+          ) : (
+            <span
+              aria-disabled="true"
+              className="inline-flex min-h-11 items-center rounded-md border border-border px-4 text-sm font-medium text-text-muted"
+            >
+              Önceki
+            </span>
+          )}
+          <span className="text-sm text-text-muted">
+            Sayfa {selection.page} / {selection.pageCount}
+          </span>
+          {selection.page < selection.pageCount ? (
+            <a
+              className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
+              href={buildHref({ page: String(selection.page + 1) })}
+            >
+              Sonraki
+            </a>
+          ) : (
+            <span
+              aria-disabled="true"
+              className="inline-flex min-h-11 items-center rounded-md border border-border px-4 text-sm font-medium text-text-muted"
+            >
+              Sonraki
+            </span>
+          )}
+        </nav>
+      ) : null}
 
       {preview && selected ? (
         <div
