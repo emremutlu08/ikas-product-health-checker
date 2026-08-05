@@ -1,3 +1,5 @@
+import { AppNav } from "@/components/AppNav";
+
 /**
  * Dashboard header: who this is, what it last did, and the one operation that costs anything.
  *
@@ -40,7 +42,8 @@ export function DashboardHeader({
   scanBusy,
 }: DashboardHeaderProps) {
   return (
-    <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
+    <header className="flex flex-col gap-4 border-b border-border pb-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex flex-col gap-1">
         <h1 className="text-title font-semibold tracking-tight text-text">Ürün Sağlığı</h1>
         {storeName ? (
@@ -67,33 +70,12 @@ export function DashboardHeader({
         ) : null}
       </div>
 
+      {/*
+        Actions only. Navigation used to sit in this same row as identical pills, so "go to
+        Geçmiş" and "start a scan that locks the store for minutes" looked like the same kind of
+        thing. The menu now has its own row below, and exactly one control here is filled.
+      */}
       <div className="flex flex-wrap items-center gap-2">
-        <nav aria-label="Ana navigasyon" className="flex flex-wrap items-center gap-2">
-          <a
-            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
-            href="/history"
-          >
-            Geçmiş
-          </a>
-          <a
-            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
-            href="/settings"
-          >
-            Ayarlar
-          </a>
-          <a
-            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
-            href="/corrections"
-          >
-            Düzeltmeler
-          </a>
-          <a
-            className="inline-flex min-h-11 items-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text"
-            href="/plan"
-          >
-            Plan
-          </a>
-        </nav>
         {csvHref ? (
           <a
             className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
@@ -119,6 +101,9 @@ export function DashboardHeader({
           </button>
         </form>
       </div>
+      </div>
+
+      <AppNav current="/" />
     </header>
   );
 }

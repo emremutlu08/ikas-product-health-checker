@@ -82,6 +82,16 @@ export function CorrectionPanel({
   nextPageHref,
 }: CorrectionPanelProps) {
   const [selected, setSelected] = useState<CorrectableTarget | undefined>();
+  /**
+   * Targets this session has fixed, keyed the same way the list is, holding the value the server
+   * read back from ikas.
+   *
+   * The list itself comes from the stored scan and cannot change until the next one, so without
+   * this a merchant who just corrected a SKU still saw "Aktif varyantta SKU eksik — Mevcut değer:
+   * — (boş)" under a message claiming the write was verified. They would either do it twice or
+   * stop believing the message.
+   */
+  const [fixed, setFixed] = useState<Record<string, string>>({});
   /** One value per row, so typing in one correction never disturbs another. */
   const [values, setValues] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<PreviewState | undefined>();
@@ -160,17 +170,24 @@ export function CorrectionPanel({
       if (!response.ok) {
         setResult({ tone: "warning", message: correctionErrorMessage(payload.error) });
       } else {
-        // Reachable only after the server proved the value with a source-of-truth read.
+        // Reachable only after the server proved the value with a source-of-truth read, so this
+        // is the one place a target may be shown as fixed.
+        const verified = displayValue(payload.verifiedValue);
         setResult({
           tone: "success",
-          message: `Düzeltme uygulandı ve ikas'tan okunarak doğrulandı. Yeni değer: ${displayValue(payload.verifiedValue)}`,
+          message: `Düzeltme uygulandı ve ikas'tan okunarak doğrulandı. Yeni değer: ${verified}`,
         });
+        if (selected) {
+          setFixed((current) => ({ ...current, [targetKey(selected)]: verified }));
+        }
       }
     } catch {
       setResult({ tone: "warning", message: correctionErrorMessage(undefined) });
     }
     reset();
   }
+
+  const fixedCount = Object.keys(fixed).length;
 
   if (selection.unfilteredTargets === 0) {
     return (
@@ -235,16 +252,32 @@ export function CorrectionPanel({
           ? "Aramanızla eşleşen düzeltme yok."
           : `${selection.rangeStart}–${selection.rangeEnd} / ${selection.totalTargets} düzeltme` +
             (query.search ? ` (toplam ${selection.unfilteredTargets})` : "")}
+        {/*
+          Progress, not inventory. The range above says how long the list is; this says how far the
+          merchant has got. It counts only writes the server verified against ikas, and it is
+          scoped to this session because the stored scan has no idea any of it happened.
+        */}
+        {fixedCount > 0 ? (
+          <span className="font-medium text-success">
+            {" "}
+            · Bu oturumda {fixedCount} düzeltme uygulandı.
+          </span>
+        ) : null}
       </p>
 
       <ul className="flex flex-col gap-3">
         {targets.map((target) => {
           const isSelected = selected ? targetKey(selected) === targetKey(target) : false;
+          const fixedValue = fixed[targetKey(target)];
 
           return (
           <li
             className={`rounded-lg border bg-surface p-4 ${
-              isSelected ? "border-accent" : "border-border"
+              fixedValue !== undefined
+                ? "border-success"
+                : isSelected
+                  ? "border-accent"
+                  : "border-border"
             }`}
             key={targetKey(target)}
           >
@@ -274,6 +307,7 @@ export function CorrectionPanel({
                 </div>
               </div>
 
+              {fixedValue === undefined ? (
               <form
                 className="flex flex-col gap-2 sm:w-72 sm:shrink-0"
                 onSubmit={(event) => requestPreview(event, target)}
@@ -314,6 +348,7 @@ export function CorrectionPanel({
                   uygulanır.
                 </p>
               </form>
+              ) : null}
             </div>
             {/*
               The confirmation opens under the card it belongs to, not at the foot of the list.

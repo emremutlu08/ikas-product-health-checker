@@ -1,3 +1,4 @@
+import { AppNav } from "@/components/AppNav";
 import { CorrectionPanel, type CorrectableTarget } from "@/components/CorrectionPanel";
 import {
   buildCorrectionHref,
@@ -59,20 +60,7 @@ function Shell({ children, storeName }: { children: React.ReactNode; storeName?:
             <h1 className="text-title font-semibold tracking-tight">Güvenli düzeltmeler</h1>
             {storeName ? <p className="mt-1 text-sm text-text-muted">Mağaza: {storeName}</p> : null}
           </div>
-          <nav aria-label="Ana navigasyon" className="flex flex-wrap gap-2">
-            <Link
-              className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium"
-              href="/"
-            >
-              Ürün Sağlığı
-            </Link>
-            <Link
-              className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium"
-              href="/plan"
-            >
-              Plan
-            </Link>
-          </nav>
+          <AppNav current="/corrections" />
         </header>
         {children}
       </div>

@@ -199,3 +199,33 @@ describe("CorrectionPanel confirmation placement", () => {
     expect(html).not.toContain("aria-modal");
   });
 });
+
+/**
+ * The list is a projection of the stored scan, so a correction cannot change it — the card would
+ * keep reading "Aktif varyantta SKU eksik / Mevcut değer: — (boş)" directly under a message saying
+ * the write was verified. A merchant reading that either does it twice or stops trusting the
+ * message. These pin the state the card must reach instead.
+ */
+describe("CorrectionPanel after a verified fix", () => {
+  it("still offers the form while nothing has been fixed", () => {
+    const html = renderToStaticMarkup(panel([target]));
+
+    expect(html).toContain("Aktif varyantta SKU eksik.");
+    expect(html).toContain("Önizle");
+    expect(html).not.toContain("Düzeltildi");
+    // Progress is absent rather than "0 uygulandı", which would read as failure.
+    expect(html).not.toContain("Bu oturumda");
+  });
+
+  /**
+   * Only a server-verified write may mark a card as fixed, so the initial render — which has no
+   * verified result yet — must never show that state.
+   */
+  it("never shows a card as fixed before the server verified anything", () => {
+    const html = renderToStaticMarkup(panel([target, { ...target, variantId: "variant-2" }]));
+
+    expect(html).not.toContain("ikas'tan okunarak doğrulandı");
+    // The bare button label, not the "Önizleme hiçbir şey değiştirmez" sentence beside it.
+    expect(html.match(/>Önizle</g)).toHaveLength(2);
+  });
+});

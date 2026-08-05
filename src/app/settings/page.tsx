@@ -1,3 +1,4 @@
+import { AppNav } from "@/components/AppNav";
 import { IkasAppBridgeReady } from "@/components/IkasAppBridgeReady";
 import { isDailySummaryEmailConfigured } from "@/lib/monitoring/email-summary";
 import { resolveVerifiedRecipient } from "@/lib/monitoring/verified-recipient";
@@ -223,12 +224,7 @@ export default async function SettingsPage({
             <h1 className="text-title font-semibold tracking-tight">İzleme Ayarları</h1>
             <p className="mt-1 text-sm text-text-muted">Plan: Pro</p>
           </div>
-          <nav aria-label="Ana navigasyon" className="flex flex-wrap gap-2">
-            <Link className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/">Ürün Sağlığı</Link>
-            <Link className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/history">Geçmiş</Link>
-            <Link aria-current="page" className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/settings">Ayarlar</Link>
-            <Link className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium" href="/plan">Plan</Link>
-          </nav>
+          <AppNav current="/settings" />
         </header>
 
         <StatusNotice status={status} />
