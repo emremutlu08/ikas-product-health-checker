@@ -216,58 +216,73 @@ export function CorrectionPanel({ targets }: { targets: CorrectableTarget[] }) {
             className="rounded-lg border border-border bg-surface p-4"
             key={targetKey(target)}
           >
-            <div className="flex items-start gap-3">
-              <ProductImagePreview
-                alt={target.productName}
-                label={target.imageLabel}
-                src={target.imageSrc}
-              />
-              <div className="min-w-0">
-                <p className="font-medium text-text">
-                  {target.productName}
-                  {target.variantLabel ? ` — ${target.variantLabel}` : ""}
-                </p>
-                <p className="mt-1 text-sm text-text-muted">{target.issueMessage}</p>
-                <p className="mt-1 text-sm text-text-muted">
-                  Mevcut değer: {displayValue(target.currentValue)}
-                </p>
-              </div>
-            </div>
-
-            <form
-              className="mt-3 flex flex-wrap items-end gap-3"
-              onSubmit={(event) => requestPreview(event, target)}
-            >
-              <div className="flex flex-col gap-1">
-                <label
-                  className="text-sm font-medium text-text"
-                  htmlFor={`correction-${target.variantId}-${target.kind}`}
-                >
-                  {CORRECTION_FIELD_LABEL[target.kind]}
-                </label>
-                <input
-                  className="min-h-11 w-56 rounded-md border border-border-strong bg-surface px-3 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                  disabled={busy}
-                  id={`correction-${target.variantId}-${target.kind}`}
-                  inputMode={target.kind === "sku_change" ? "text" : "decimal"}
-                  name="value"
-                  onChange={(event) =>
-                    setValues((current) => ({ ...current, [targetKey(target)]: event.target.value }))
-                  }
-                  value={values[targetKey(target)] ?? ""}
+            {/*
+              What the merchant is looking at sits on the left, what they do about it on the right,
+              so a long list scans as two columns instead of a stack of near-identical blocks. The
+              split collapses below `sm` because the field and its button need the full width on a
+              phone; `min-w-0` on the left keeps a long product name from pushing the form off the
+              card instead of wrapping.
+            */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <ProductImagePreview
+                  alt={target.productName}
+                  label={target.imageLabel}
+                  src={target.imageSrc}
                 />
+                <div className="min-w-0">
+                  <p className="font-medium text-text">
+                    {target.productName}
+                    {target.variantLabel ? ` — ${target.variantLabel}` : ""}
+                  </p>
+                  <p className="mt-1 text-sm text-text-muted">{target.issueMessage}</p>
+                  <p className="mt-1 text-sm text-text-muted">
+                    Mevcut değer: {displayValue(target.currentValue)}
+                  </p>
+                </div>
               </div>
-              <button
-                className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={busy}
-                type="submit"
+
+              <form
+                className="flex flex-col gap-2 sm:w-72 sm:shrink-0"
+                onSubmit={(event) => requestPreview(event, target)}
               >
-                {phase === "previewing" ? "Önizleme hazırlanıyor" : "Önizle"}
-              </button>
-              <p className="w-full text-sm text-text-muted">
-                Önizleme hiçbir şey değiştirmez. Değişiklik yalnızca açık onayınızdan sonra uygulanır.
-              </p>
-            </form>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label
+                      className="text-sm font-medium text-text"
+                      htmlFor={`correction-${target.variantId}-${target.kind}`}
+                    >
+                      {CORRECTION_FIELD_LABEL[target.kind]}
+                    </label>
+                    <input
+                      className="min-h-11 w-full min-w-0 rounded-md border border-border-strong bg-surface px-3 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:w-44"
+                      disabled={busy}
+                      id={`correction-${target.variantId}-${target.kind}`}
+                      inputMode={target.kind === "sku_change" ? "text" : "decimal"}
+                      name="value"
+                      onChange={(event) =>
+                        setValues((current) => ({
+                          ...current,
+                          [targetKey(target)]: event.target.value,
+                        }))
+                      }
+                      value={values[targetKey(target)] ?? ""}
+                    />
+                  </div>
+                  <button
+                    className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={busy}
+                    type="submit"
+                  >
+                    {phase === "previewing" ? "Önizleme hazırlanıyor" : "Önizle"}
+                  </button>
+                </div>
+                <p className="text-sm text-text-muted">
+                  Önizleme hiçbir şey değiştirmez. Değişiklik yalnızca açık onayınızdan sonra
+                  uygulanır.
+                </p>
+              </form>
+            </div>
           </li>
         ))}
       </ul>
