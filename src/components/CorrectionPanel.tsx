@@ -238,9 +238,14 @@ export function CorrectionPanel({
       </p>
 
       <ul className="flex flex-col gap-3">
-        {targets.map((target) => (
+        {targets.map((target) => {
+          const isSelected = selected ? targetKey(selected) === targetKey(target) : false;
+
+          return (
           <li
-            className="rounded-lg border border-border bg-surface p-4"
+            className={`rounded-lg border bg-surface p-4 ${
+              isSelected ? "border-accent" : "border-border"
+            }`}
             key={targetKey(target)}
           >
             {/*
@@ -310,8 +315,75 @@ export function CorrectionPanel({
                 </p>
               </form>
             </div>
+            {/*
+              The confirmation opens under the card it belongs to, not at the foot of the list.
+              With fifty corrections on a page, a panel at the bottom means scrolling away from the
+              row being confirmed and reading "Şu anki değer" with no sight of the product it
+              belongs to. `aria-modal` is deliberately absent: nothing outside this block is inert,
+              and claiming otherwise would tell a screen reader the rest of the page is unavailable.
+            */}
+            {isSelected && preview ? (
+              <div
+                aria-labelledby={dialogTitleId}
+                className="mt-4 rounded-md border border-accent bg-surface-sunken p-4"
+                role="dialog"
+              >
+                <h3 className="text-title font-semibold text-text" id={dialogTitleId}>
+                  {CORRECTION_KIND_LABEL[target.kind]} onayı
+                </h3>
+                <p className="mt-2 text-sm text-text-muted">
+                  {target.productName}
+                  {target.variantLabel ? ` — ${target.variantLabel}` : ""}
+                </p>
+
+                <dl className="mt-3 grid gap-2 text-sm">
+                  <div className="flex gap-2">
+                    <dt className="font-medium text-text">Değişecek alan:</dt>
+                    <dd className="text-text-muted">{preview.fieldLabel}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="font-medium text-text">Şu anki değer:</dt>
+                    <dd className="text-text-muted">{preview.previousValue}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="font-medium text-text">Yeni değer:</dt>
+                    <dd className="text-text-muted">{preview.proposedValue}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="font-medium text-text">Değişmeyecek:</dt>
+                    <dd className="text-text-muted">{preview.preservedFields.join(", ")}</dd>
+                  </div>
+                </dl>
+
+                <p className="mt-3 rounded-md border border-border bg-surface px-4 py-3 text-sm leading-6 text-text">
+                  Onayladığınızda bu tek alan ikas kataloğunuzda kalıcı olarak değiştirilir.
+                  Değişiklik uygulandıktan sonra ikas&apos;tan yeniden okunarak doğrulanır ve diğer
+                  alanların değişmediği kontrol edilir. Bu onay yalnızca bir kez kullanılabilir.
+                </p>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-5 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong"
+                    disabled={busy}
+                    onClick={confirm}
+                    type="button"
+                  >
+                    {phase === "confirming" ? "Uygulanıyor" : "Onayla ve uygula"}
+                  </button>
+                  <button
+                    className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={busy}
+                    onClick={reset}
+                    type="button"
+                  >
+                    Vazgeç
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </li>
-        ))}
+          );
+        })}
       </ul>
 
       {selection.pageCount > 1 ? (
@@ -352,66 +424,6 @@ export function CorrectionPanel({
         </nav>
       ) : null}
 
-      {preview && selected ? (
-        <div
-          aria-labelledby={dialogTitleId}
-          aria-modal="true"
-          className="rounded-lg border border-accent bg-surface p-5 shadow-card"
-          role="dialog"
-        >
-          <h3 className="text-title font-semibold text-text" id={dialogTitleId}>
-            {CORRECTION_KIND_LABEL[selected.kind]} onayı
-          </h3>
-          <p className="mt-2 text-sm text-text-muted">
-            {selected.productName}
-            {selected.variantLabel ? ` — ${selected.variantLabel}` : ""}
-          </p>
-
-          <dl className="mt-3 grid gap-2 text-sm">
-            <div className="flex gap-2">
-              <dt className="font-medium text-text">Değişecek alan:</dt>
-              <dd className="text-text-muted">{preview.fieldLabel}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="font-medium text-text">Şu anki değer:</dt>
-              <dd className="text-text-muted">{preview.previousValue}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="font-medium text-text">Yeni değer:</dt>
-              <dd className="text-text-muted">{preview.proposedValue}</dd>
-            </div>
-            <div className="flex gap-2">
-              <dt className="font-medium text-text">Değişmeyecek:</dt>
-              <dd className="text-text-muted">{preview.preservedFields.join(", ")}</dd>
-            </div>
-          </dl>
-
-          <p className="mt-3 rounded-md border border-border bg-surface-sunken px-4 py-3 text-sm leading-6 text-text">
-            Onayladığınızda bu tek alan ikas kataloğunuzda kalıcı olarak değiştirilir. Değişiklik
-            uygulandıktan sonra ikas&apos;tan yeniden okunarak doğrulanır ve diğer alanların
-            değişmediği kontrol edilir. Bu onay yalnızca bir kez kullanılabilir.
-          </p>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-5 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong"
-              disabled={busy}
-              onClick={confirm}
-              type="button"
-            >
-              {phase === "confirming" ? "Uygulanıyor" : "Onayla ve uygula"}
-            </button>
-            <button
-              className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong bg-surface px-4 text-sm font-medium text-text transition hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy}
-              onClick={reset}
-              type="button"
-            >
-              Vazgeç
-            </button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

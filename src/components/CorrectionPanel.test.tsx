@@ -174,3 +174,28 @@ describe("CorrectionPanel search", () => {
     expect(html).not.toContain("<img");
   });
 });
+
+/**
+ * With fifty corrections on a page, a confirmation rendered at the foot of the list means the
+ * merchant reads "Şu anki değer" with the product it belongs to scrolled off screen — and confirms
+ * a permanent catalog write from there. It has to sit inside the card it acts on.
+ */
+describe("CorrectionPanel confirmation placement", () => {
+  it("keeps the confirmation inside the list, not appended after it", () => {
+    const html = renderToStaticMarkup(panel([target]));
+
+    // Nothing to confirm yet, so the marker that proves placement is the list itself closing last.
+    expect(html.lastIndexOf("</ul>")).toBeGreaterThan(html.indexOf("<li"));
+    expect(html).not.toContain('role="dialog"');
+  });
+
+  /**
+   * `aria-modal` would claim the rest of the page is unavailable. Nothing here is inert — the other
+   * cards stay readable and reachable — so asserting it would mislead a screen reader.
+   */
+  it("never claims to be a modal", () => {
+    const html = renderToStaticMarkup(panel([target]));
+
+    expect(html).not.toContain("aria-modal");
+  });
+});
