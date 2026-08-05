@@ -116,6 +116,6 @@ is not built, and until it is, the screen must not imply otherwise.
    there is nothing to diff against, so this closes on the second scheduled scan.
 3. **The low-stock threshold, exercised.** Set a threshold on a Pro store and confirm the next scan
    honours it.
-4. **Multi-variant canary.** `updateProduct` writing one variant has never been proven to leave
-   sibling variants alone. Needs a baseline SKU on a multi-variant product in `dev-emre2` and a
-   live development token. `IKAS_PRODUCT_WRITES_ENABLED` stays closed until this is recorded here.
+4. ~~**Multi-variant canary.**~~ Passed 2026-08-05 on a 24-variant product: writing one variant
+   left the other 23 untouched, and the rollback restored the product exactly. Recorded in
+   [live-ikas-gate.md](live-ikas-gate.md).

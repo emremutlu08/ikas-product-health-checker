@@ -125,7 +125,25 @@ Neither flag may be opened until a reversible `dev-emre2` canary has proved, wit
 before/after/rollback, that a single-variant `updateProduct` leaves every other variant and every
 omitted field unchanged.
 
-### Canary status — 2026-07-28
+### Multi-variant canary — passed 2026-08-05
+
+Target: `dev-emre2`, `Premium Shorts` (`f4081e72-…`), **24 variants**, one variant
+(`3fc514c9-…`) carrying the baseline SKU `CANARY-BASE-1`.
+
+The run wrote `CANARY-TEST-1` to that one variant through the app's own writer, read the whole
+product back from ikas, compared every field of every variant against the pre-write snapshot,
+then restored `CANARY-BASE-1` and compared again.
+
+- `changedByWrite: []` — writing one variant altered nothing else on the product.
+- `changedOverall: []` — after rollback the product was byte-for-byte where it started.
+- Verified independently of the test: the product's `updatedAt` moved to the moment of the run, so
+  a real write reached ikas; the target variant reads `CANARY-BASE-1`; the other 23 variants still
+  carry an empty SKU.
+
+This is what the single-variant canary could not show. `updateProduct` carrying one variant leaves
+sibling variants alone, on a real 24-variant product, and the change is reversible.
+
+### Earlier canary status — 2026-07-28
 
 The recorded canary ran on a **single-variant** product, so the sibling-variant case it exists to
 prove is still open. Two things block the multi-variant run:
