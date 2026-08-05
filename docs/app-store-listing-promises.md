@@ -45,9 +45,9 @@ promised behaviour has been seen to happen, and the two are recorded separately 
 | --- | --- | --- |
 | Günde bir kez otomatik tarama | Open | **Yes** — see below. |
 | Tarama geçmişi ve sorun farkları | Open | **Half.** The history surface renders and holds the retained scheduled scan (`04.08.2026 10:00`, 31 products). It holds exactly one entry, so the *diff* half of the promise cannot be shown until a second scan lands. |
-| Düşük stok eşiği ayarı | Open | **No.** The settings surface has never been exercised with a Pro entitlement. |
-| Günlük e-posta özeti | **Closed** | **No.** `RESEND_API_KEY` and `IKAS_EMAIL_FROM` are set, but `mail.emre-mutlu.com.tr` is unverified in Resend, so nothing can be sent. |
-| Düşük stok ve toparlanma bildirimleri | **Closed** | **No.** Same transport, same gap. |
+| Düşük stok eşiği ayarı | Open | **Configured, unproven.** A threshold of 5 is saved on `dev-emre4` under Pro. Whether a scan honours it is only visible in the next scheduled run. |
+| Günlük e-posta özeti | Open | **Configured, unproven.** `mail.designdevjourney.com` is verified in Resend, the recipient allowlist names both installations, and the merchant toggle is on. No summary has been sent yet — the last run reported `emailSkipped: 2`, before any of this was in place. Closes on `sent: 1`. |
+| Düşük stok ve toparlanma bildirimleri | Open | **Configured, unproven.** Same transport, now ready. Needs a scan where a variant actually crosses the threshold. |
 
 ### The scheduled scan, proven — 2026-08-04
 
@@ -67,6 +67,22 @@ A caution for the next person reading production logs here: `vercel logs` retain
 four hours. A daily job is invisible in that window for most of the day, and its absence from the
 log is not evidence that it did not run. Two hours were spent chasing an anomaly that was only a
 gap in retention.
+
+### Email, end to end — configured 2026-08-05
+
+Every link in the chain is now in place and each was verified separately rather than assumed:
+
+- Sender domain `mail.designdevjourney.com` shows `Verified` in Resend, region eu-west-1, DNS
+  written through GoDaddy.
+- `IKAS_EMAIL_FROM` and `RESEND_API_KEY` are set in Vercel Production.
+- `IKAS_VERIFIED_EMAIL_RECIPIENTS_JSON` names both installations. Nothing is mailed to an address
+  that is not on that list, which is why configuring the transport alone was never enough.
+- The merchant toggle is on, and the settings screen reports all three readiness lines green with
+  the recipient masked as `e***3@gmail.com`.
+
+None of that is evidence that a merchant receives anything. The last scheduled run reported
+`emailSkipped: 2`, taken before this configuration existed. The promise closes when a run reports
+`sent: 1`, and not before.
 
 ### What the plan screen may and may not claim — 2026-08-03
 
@@ -93,9 +109,8 @@ is not built, and until it is, the screen must not imply otherwise.
 
 ## Open gates before the first paying merchant
 
-1. **Sender domain.** Verify `mail.emre-mutlu.com.tr` in Resend by publishing the MX and two TXT
-   records it issues. Everything else for email is already configured. Closes when a cron run
-   reports `sent: 1`.
+1. ~~**Sender domain.**~~ Closed 2026-08-05: `mail.designdevjourney.com` verified. What remains is
+   a run reporting `sent: 1`.
 2. ~~**A scheduled scan that actually runs.**~~ Closed 2026-08-04: `scheduled: 2, completed: 2`.
    History retains it and the surface renders it. What remains is the comparison: with one entry
    there is nothing to diff against, so this closes on the second scheduled scan.
