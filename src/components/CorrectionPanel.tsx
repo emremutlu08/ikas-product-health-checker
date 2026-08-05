@@ -60,10 +60,27 @@ export type CorrectionPanelProps = {
   targets: CorrectableTarget[];
   selection: CorrectionSelection;
   query: CorrectionQuery;
-  buildHref(patch: Record<string, string | undefined>): string;
+  /**
+   * Ready-made URLs rather than a builder function.
+   *
+   * This is a client component, and React refuses to serialize a function across that boundary —
+   * passing one renders the whole screen as an error. The server knows every destination before
+   * it renders, so it computes them here and hands over plain strings. Absent means "no such
+   * page", which is what the disabled control below reflects.
+   */
+  clearSearchHref?: string;
+  previousPageHref?: string;
+  nextPageHref?: string;
 };
 
-export function CorrectionPanel({ targets, selection, query, buildHref }: CorrectionPanelProps) {
+export function CorrectionPanel({
+  targets,
+  selection,
+  query,
+  clearSearchHref,
+  previousPageHref,
+  nextPageHref,
+}: CorrectionPanelProps) {
   const [selected, setSelected] = useState<CorrectableTarget | undefined>();
   /** One value per row, so typing in one correction never disturbs another. */
   const [values, setValues] = useState<Record<string, string>>({});
@@ -203,10 +220,10 @@ export function CorrectionPanel({ targets, selection, query, buildHref }: Correc
         >
           Ara
         </button>
-        {query.search ? (
+        {query.search && clearSearchHref ? (
           <a
             className="inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
-            href={buildHref({ q: undefined, page: undefined })}
+            href={clearSearchHref}
           >
             Temizle
           </a>
@@ -299,10 +316,10 @@ export function CorrectionPanel({ targets, selection, query, buildHref }: Correc
 
       {selection.pageCount > 1 ? (
         <nav aria-label="Sayfalama" className="flex flex-wrap items-center gap-2">
-          {selection.page > 1 ? (
+          {previousPageHref ? (
             <a
               className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
-              href={buildHref({ page: String(selection.page - 1) })}
+              href={previousPageHref}
             >
               Önceki
             </a>
@@ -317,10 +334,10 @@ export function CorrectionPanel({ targets, selection, query, buildHref }: Correc
           <span className="text-sm text-text-muted">
             Sayfa {selection.page} / {selection.pageCount}
           </span>
-          {selection.page < selection.pageCount ? (
+          {nextPageHref ? (
             <a
               className="inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 text-sm font-medium text-text transition hover:bg-surface-sunken"
-              href={buildHref({ page: String(selection.page + 1) })}
+              href={nextPageHref}
             >
               Sonraki
             </a>

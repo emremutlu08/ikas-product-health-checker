@@ -36,12 +36,10 @@ function panel(targets: CorrectableTarget[], search = "") {
 
   return (
     <CorrectionPanel
-      buildHref={(patch) => `/corrections?${new URLSearchParams(
-        Object.entries(patch).filter((entry): entry is [string, string] => Boolean(entry[1])),
-      ).toString()}`}
       query={{ search, page: 1 }}
       selection={selection}
       targets={targets}
+      {...(search ? { clearSearchHref: "/corrections" } : {})}
     />
   );
 }

@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  panelProps: [] as Record<string, unknown>[],
   getSession: vi.fn(),
   readInstallationSession: vi.fn(),
   resolveInstallationEntitlement: vi.fn(),
@@ -27,6 +28,21 @@ vi.mock("@/lib/ikas/report-service", () => ({
 }));
 
 vi.mock("@/components/IkasAppBridgeReady", () => ({ IkasAppBridgeReady: () => null }));
+
+/**
+ * Wraps the real panel so a test can inspect exactly what crossed the server-to-client boundary,
+ * while everything else still renders the genuine component.
+ */
+vi.mock("@/components/CorrectionPanel", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/CorrectionPanel")>();
+  return {
+    ...actual,
+    CorrectionPanel: (props: Record<string, unknown>) => {
+      mocks.panelProps.push(props);
+      return actual.CorrectionPanel(props as never);
+    },
+  };
+});
 
 import CorrectionsPage from "./page";
 
@@ -159,6 +175,27 @@ describe("corrections page", () => {
 
     expect(html).toContain('value="classic"');
     expect(html).toContain('action="/corrections"');
+  });
+
+  /**
+   * `CorrectionPanel` is a client component, and React refuses to serialize a function across that
+   * boundary — it renders the entire screen as an error instead. Every test here rendered fine
+   * while production was broken, because `renderToStaticMarkup` does not enforce that rule. This
+   * asserts the contract the runtime enforces rather than the one the test renderer does.
+   */
+  it("hands the client component only serializable props", async () => {
+    mocks.resolveRolloutSignals.mockReturnValue({ ...signals, productWritesEnabled: true });
+    mocks.panelProps.length = 0;
+
+    await render({ q: "classic", page: "2" });
+
+    expect(mocks.panelProps).toHaveLength(1);
+    const offending = Object.entries(mocks.panelProps[0]!).filter(
+      ([, value]) => typeof value === "function",
+    );
+    expect(offending.map(([name]) => name)).toEqual([]);
+    // Structured-clone is the actual serialization boundary, so failing it here is failing there.
+    expect(() => structuredClone(mocks.panelProps[0])).not.toThrow();
   });
 
   it("states the safety contract on the page itself", async () => {

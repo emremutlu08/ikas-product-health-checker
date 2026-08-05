@@ -192,10 +192,18 @@ export default async function CorrectionsPage({
         alanların değişmediği kontrol edilir.
       </p>
       <CorrectionPanel
-        buildHref={(patch) => buildCorrectionHref(query, patch)}
         query={query}
         selection={selection}
         targets={selection.targets}
+        {...(query.search
+          ? { clearSearchHref: buildCorrectionHref(query, { q: undefined, page: undefined }) }
+          : {})}
+        {...(selection.page > 1
+          ? { previousPageHref: buildCorrectionHref(query, { page: String(selection.page - 1) }) }
+          : {})}
+        {...(selection.page < selection.pageCount
+          ? { nextPageHref: buildCorrectionHref(query, { page: String(selection.page + 1) }) }
+          : {})}
       />
     </Shell>
   );
