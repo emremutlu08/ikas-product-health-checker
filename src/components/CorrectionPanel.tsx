@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { ProductImagePreview } from "./ProductImagePreview";
 import {
   CORRECTION_FIELD_LABEL,
   CORRECTION_KIND_LABEL,
@@ -30,6 +31,9 @@ export type CorrectableTarget = {
   kind: MutationOperationKind;
   issueMessage: string;
   currentValue: string;
+  /** Initials shown when there is no usable image, so a row is never a blank square. */
+  imageLabel: string;
+  imageSrc?: string;
 };
 
 type PreviewState = {
@@ -52,12 +56,14 @@ function displayValue(value: unknown) {
 
 export function CorrectionPanel({ targets }: { targets: CorrectableTarget[] }) {
   const [selected, setSelected] = useState<CorrectableTarget | undefined>();
+  const [query, setQuery] = useState("");
   /** One value per row, so typing in one correction never disturbs another. */
   const [values, setValues] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<PreviewState | undefined>();
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<ResultState | undefined>();
   const dialogTitleId = useId();
+  const searchId = useId();
   const busy = phase !== "idle";
 
   function targetKey(target: CorrectableTarget) {
@@ -141,6 +147,21 @@ export function CorrectionPanel({ targets }: { targets: CorrectableTarget[] }) {
     reset();
   }
 
+  /**
+   * Matched against product and variant name only. A merchant arriving here already knows which
+   * product they came to fix, and a scan can list hundreds of variants — without this the screen
+   * is a scroll hunt. Normalised with a Turkish locale so "İ" and "ı" behave the way a Turkish
+   * keyboard produces them.
+   */
+  const normalise = (value: string) => value.toLocaleLowerCase("tr-TR").trim();
+  const visibleTargets = useMemo(() => {
+    const needle = normalise(query);
+    if (!needle) return targets;
+    return targets.filter((target) =>
+      normalise(`${target.productName} ${target.variantLabel ?? ""}`).includes(needle),
+    );
+  }, [targets, query]);
+
   if (targets.length === 0) {
     return (
       <p className="rounded-md border border-border bg-surface-sunken px-4 py-3 text-sm text-text-muted">
@@ -164,20 +185,54 @@ export function CorrectionPanel({ targets }: { targets: CorrectableTarget[] }) {
         </p>
       ) : null}
 
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium text-text" htmlFor={`${searchId}-search`}>
+          Ürün ara
+        </label>
+        <input
+          className="min-h-11 w-full max-w-md rounded-md border border-border-strong bg-surface px-3 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          id={`${searchId}-search`}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Ürün veya varyant adı"
+          type="search"
+          value={query}
+        />
+        <p aria-live="polite" className="text-sm text-text-muted">
+          {query
+            ? `${visibleTargets.length} / ${targets.length} düzeltme gösteriliyor.`
+            : `${targets.length} düzeltme gösteriliyor.`}
+        </p>
+      </div>
+
+      {visibleTargets.length === 0 ? (
+        <p className="rounded-md border border-border bg-surface-sunken px-4 py-3 text-sm text-text-muted">
+          Aramanızla eşleşen düzeltme yok. Aramayı temizleyerek hepsini görebilirsiniz.
+        </p>
+      ) : null}
+
       <ul className="flex flex-col gap-3">
-        {targets.map((target) => (
+        {visibleTargets.map((target) => (
           <li
             className="rounded-lg border border-border bg-surface p-4"
             key={targetKey(target)}
           >
-            <p className="font-medium text-text">
-              {target.productName}
-              {target.variantLabel ? ` — ${target.variantLabel}` : ""}
-            </p>
-            <p className="mt-1 text-sm text-text-muted">{target.issueMessage}</p>
-            <p className="mt-1 text-sm text-text-muted">
-              Mevcut değer: {displayValue(target.currentValue)}
-            </p>
+            <div className="flex items-start gap-3">
+              <ProductImagePreview
+                alt={target.productName}
+                label={target.imageLabel}
+                src={target.imageSrc}
+              />
+              <div className="min-w-0">
+                <p className="font-medium text-text">
+                  {target.productName}
+                  {target.variantLabel ? ` — ${target.variantLabel}` : ""}
+                </p>
+                <p className="mt-1 text-sm text-text-muted">{target.issueMessage}</p>
+                <p className="mt-1 text-sm text-text-muted">
+                  Mevcut değer: {displayValue(target.currentValue)}
+                </p>
+              </div>
+            </div>
 
             <form
               className="mt-3 flex flex-wrap items-end gap-3"

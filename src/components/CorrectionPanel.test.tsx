@@ -15,6 +15,7 @@ const target: CorrectableTarget = {
   kind: "sku_change",
   issueMessage: "Aktif varyantta SKU eksik.",
   currentValue: "",
+  imageLabel: "CL",
 };
 
 describe("CorrectionPanel", () => {
@@ -99,5 +100,38 @@ describe("correctionErrorMessage", () => {
     ]) {
       expect(CORRECTION_ERROR_MESSAGES[code]).toContain("kontrol edin");
     }
+  });
+});
+
+/**
+ * A scan can produce hundreds of correctable variants. Without a filter the merchant scrolls to
+ * find the one product they came for, and the count line is what tells them the filter is doing
+ * something rather than silently hiding rows.
+ */
+describe("CorrectionPanel search", () => {
+  it("offers a labelled search field and states how much is on screen", () => {
+    const html = renderToStaticMarkup(<CorrectionPanel targets={[target]} />);
+
+    expect(html).toContain("Ürün ara");
+    expect(html).toContain("1 düzeltme gösteriliyor.");
+    expect(html).toContain('type="search"');
+  });
+
+  it("shows the product image beside each correction", () => {
+    const withImage: CorrectableTarget = {
+      ...target,
+      imageSrc: "https://cdn.example.test/sleeve.webp",
+    };
+
+    const html = renderToStaticMarkup(<CorrectionPanel targets={[withImage]} />);
+
+    expect(html).toContain("https://cdn.example.test/sleeve.webp");
+  });
+
+  it("falls back to initials rather than an empty tile when there is no image", () => {
+    const html = renderToStaticMarkup(<CorrectionPanel targets={[target]} />);
+
+    expect(html).toContain("CL");
+    expect(html).not.toContain("<img");
   });
 });

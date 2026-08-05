@@ -45,6 +45,18 @@ const snapshot = {
   stale: false,
   snapshot: {
     report: {
+      // Present because production always stores it, and the correction screen reads its images
+      // from here rather than fetching the catalog again.
+      productRows: [
+        {
+          productId: "product-1",
+          productName: "Classic Laptop Sleeve",
+          imageLabel: "CL",
+          imageSrc: "https://cdn.example.test/product-1.webp",
+          mistakes: ["SKU Eksik"],
+          actionLabel: "İncele",
+        },
+      ],
       issues: [
         {
           code: "missing_sku",
@@ -110,6 +122,19 @@ describe("corrections page", () => {
     expect(html).toContain("Önizle");
     // A description problem is not correctable, so it is not offered.
     expect(html).not.toContain("Üründe açıklama yok.");
+  });
+
+  /**
+   * A correction list without pictures is a wall of near-identical variant names — "Basic Cap —
+   * Varyant 1" through 24 — and picking the wrong one writes to the wrong variant. The image is
+   * taken from the stored scan, so showing it costs no extra catalog read.
+   */
+  it("shows the product image the scan already resolved", async () => {
+    mocks.resolveRolloutSignals.mockReturnValue({ ...signals, productWritesEnabled: true });
+
+    const html = await render();
+
+    expect(html).toContain("https://cdn.example.test/product-1.webp");
   });
 
   it("states the safety contract on the page itself", async () => {

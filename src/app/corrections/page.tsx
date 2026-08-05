@@ -132,6 +132,18 @@ export default async function CorrectionsPage() {
     );
   }
 
+  /**
+   * Images come from the stored product rows rather than being fetched again: the scan already
+   * resolved them, and a correction screen that re-read the catalog would contradict its own
+   * promise that nothing happens until the merchant asks for a preview.
+   */
+  const imagesByProduct = new Map(
+    snapshot.snapshot.report.productRows.map((row) => [
+      row.productId,
+      { imageLabel: row.imageLabel, imageSrc: row.imageSrc },
+    ]),
+  );
+
   const seen = new Set<string>();
   const targets: CorrectableTarget[] = [];
   for (const issue of snapshot.snapshot.report.issues) {
@@ -140,6 +152,7 @@ export default async function CorrectionsPage() {
     const key = `${issue.productId}:${issue.variantId}:${kind}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    const image = imagesByProduct.get(issue.productId);
     targets.push({
       productId: issue.productId,
       productName: issue.productName,
@@ -148,6 +161,9 @@ export default async function CorrectionsPage() {
       kind,
       issueMessage: issue.message,
       currentValue: issue.value === undefined ? "" : String(issue.value),
+      // Initials rather than a blank tile when the product carries no usable image.
+      imageLabel: image?.imageLabel ?? issue.productName.slice(0, 2).toLocaleUpperCase("tr-TR"),
+      ...(image?.imageSrc ? { imageSrc: image.imageSrc } : {}),
     });
   }
 
