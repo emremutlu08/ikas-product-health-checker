@@ -523,7 +523,8 @@ describe("tenant-bound access control", () => {
     expect(html).toContain("ikas ile güvenli şekilde bağlan");
     expect(html).toContain('href="/authorize-store"');
     expect(html.match(/href="\/authorize-store"/g)).toHaveLength(1);
-    expect(html).toContain("Ürün veya stok bilgileri değiştirilmez");
+    expect(html).toContain("Onaysız hiçbir şey değişmez");
+    expect(html).not.toContain("Ürün veya stok bilgileri değiştirilmez");
     expect(html).toContain("bg-canvas");
     expect(html).not.toContain("MVP");
     expect(html).not.toContain("ilk sürüm");
@@ -579,10 +580,14 @@ describe("paid-feature interest", () => {
     expect(html).not.toContain("stok riski bulundu");
   });
 
-  it("keeps the read-only promise on this section in customer-facing words", async () => {
+  it("scopes this section's safety promise to what this section actually does", async () => {
     const html = await renderHome();
 
-    expect(html).toContain("Stok ve ürün bilgileriniz değiştirilmez");
+    // The blanket "stok ve ürün bilgileriniz değiştirilmez" stopped being true when the write
+    // flags opened. What is still true, and all this paragraph ever needed to say, is that the
+    // count it explains is arithmetic over a scan.
+    expect(html).toContain("Bu hesap stoğunuza dokunmaz");
+    expect(html).not.toContain("Stok ve ürün bilgileriniz değiştirilmez");
   });
 
   it("uses no internal roadmap language to describe the feature", async () => {

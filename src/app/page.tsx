@@ -244,10 +244,11 @@ function FirstScanScreen({
             yapmaz.
           </p>
           <div className="mt-4 rounded-md border border-border bg-surface-sunken p-4 text-sm leading-6 text-text">
-            <p className="font-semibold">Yalnızca okuma</p>
+            <p className="font-semibold">Tarama yalnızca okur</p>
             <p className="mt-1 text-text-muted">
-              SKU, barkod, fiyat, görsel, tekrarlanan başlık ve stok kuralları kontrol edilir. Ürün
-              veya stok bilgileri değiştirilmez.
+              SKU, barkod, fiyat, görsel, tekrarlanan başlık ve stok kuralları kontrol edilir.
+              Taramanın kendisi hiçbir şeyi değiştirmez; bir düzeltme yalnızca siz önizleyip
+              onayladığınızda yazılır.
             </p>
           </div>
           {storeName ? <p className="mt-4 text-sm text-text-muted">Mağaza: {storeName}</p> : null}
@@ -274,13 +275,14 @@ function SetupRequiredScreen({ expired = false, storeName }: { expired?: boolean
           </h1>
           <p className="mt-3 text-sm leading-6 text-text-muted">
             Mağazanı bağlayarak SKU, barkod, fiyat, görsel ve stok sorunlarını tek raporda gör.
-            Uygulama yalnızca ürün ve stok bilgilerini okur.
+            Uygulama ürün ve stok bilgilerini okur.
           </p>
           <div className="mt-4 rounded-md border border-border bg-surface-sunken p-4 text-sm leading-6 text-text">
-            <p className="font-semibold">Güvenli ve salt okunur</p>
+            <p className="font-semibold">Onaysız hiçbir şey değişmez</p>
             <p className="mt-1 text-text-muted">
-              Ürün veya stok bilgileri değiştirilmez. Yetkilendirmeyi ikas ekranında onaylarsın ve
-              bağlantıdan sonra ilk sağlık raporun açılır.
+              Tarama yalnızca okur. Bir düzeltme yalnızca sen önizleyip onayladığında yazılır;
+              sipariş, müşteri ve ödeme verilerine hiç dokunulmaz. Yetkilendirmeyi ikas ekranında
+              onaylarsın ve bağlantıdan sonra ilk sağlık raporun açılır.
             </p>
           </div>
           {storeName ? (
@@ -329,8 +331,7 @@ function LowStockInterestSection({
           <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">
             Düşük stok uyarısı henüz kullanılamıyor. Yukarıdaki sayı, belirlediğiniz bir stok
             eşiğine göre değil; yalnızca stoğu tamamen bitmiş ve stok dışı satışı kapalı olduğu
-            için satılamayan varyantlara göre hesaplanır. Stok ve ürün bilgileriniz
-            değiştirilmez.
+            için satılamayan varyantlara göre hesaplanır. Bu hesap stoğunuza dokunmaz.
           </p>
         </div>
         {interestRecorded ? (

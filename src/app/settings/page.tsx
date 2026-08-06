@@ -110,7 +110,7 @@ function SettingsForm({
         />
         <p className="text-sm leading-6 text-text-muted" id="lowStockThreshold-help">
           Stok adedi 1 ile bu değer arasında olan aktif varyantlar taramada düşük stok olarak
-          işaretlenir. 0 girildiğinde düşük stok uyarısı kapalı olur. Stok bilgileriniz değiştirilmez.
+          işaretlenir. 0 girildiğinde düşük stok uyarısı kapalı olur. Bu ayar stoğunuzu değiştirmez.
         </p>
       </div>
 

@@ -4,7 +4,8 @@ import { APP_FULL_NAME } from "@/globals/branding";
 
 export const metadata: Metadata = {
   title: APP_FULL_NAME,
-  description: "ikas ürün ve stok verilerini salt okunur olarak kontrol eden ürün sağlığı raporu.",
+  description:
+    "ikas ürün ve stok verilerini tarayıp sorunları raporlar; düzeltmeler yalnızca siz onaylarsanız yazılır.",
 };
 
 export default function RootLayout({

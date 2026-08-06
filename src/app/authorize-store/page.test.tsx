@@ -55,10 +55,11 @@ describe("authorization behaviour is unchanged by the restyle", () => {
     expect(html).toContain("ikas ile güvenli şekilde bağlan");
   });
 
-  it("still explains the read-only scope and keeps the field help wired up", async () => {
+  it("still explains what the app may write and keeps the field help wired up", async () => {
     const html = await render();
 
-    expect(html).toContain("Ürün veya stok bilgileri değiştirilmez");
+    expect(html).toContain("Onaysız hiçbir şey değişmez");
+    expect(html).not.toContain("Ürün veya stok bilgileri değiştirilmez");
     expect(html).toContain('id="storeName-help"');
     expect(html).toContain('aria-describedby="storeName-help"');
   });

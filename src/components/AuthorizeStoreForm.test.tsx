@@ -3,13 +3,18 @@ import { describe, expect, it } from "vitest";
 import { AuthorizeStoreForm } from "./AuthorizeStoreForm";
 
 describe("AuthorizeStoreForm", () => {
-  it("explains the read-only authorization before submission", () => {
+  it("states what the app may do to the catalog before the merchant authorizes it", () => {
     const html = renderToStaticMarkup(
       <AuthorizeStoreForm initialStoreName="dev-emre2" supportId="" />,
     );
 
-    expect(html).toContain("Yalnızca ürün ve stok bilgilerini okur");
-    expect(html).toContain("Ürün veya stok bilgileri değiştirilmez");
+    // This box is the last thing a merchant reads before granting access, so it is the one place
+    // an over-promise is most expensive. It promised the app never writes; it now promises the
+    // thing that is actually guaranteed — no write without their confirmation.
+    expect(html).toContain("Onaysız hiçbir şey değişmez");
+    expect(html).toContain("tarama hiçbir şeyi değiştirmez");
+    expect(html).toContain("yalnızca sen önizleyip onayladığında yazılır");
+    expect(html).not.toContain("Ürün veya stok bilgileri değiştirilmez");
     expect(html).toContain("Bağlantıdan sonra ilk sağlık raporun açılır");
     expect(html).toContain("ikas ile güvenli şekilde bağlan");
     expect(html).toContain('autoComplete="off"');

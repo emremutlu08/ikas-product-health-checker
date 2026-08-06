@@ -84,10 +84,11 @@ export function AuthorizeStoreForm({ initialStoreName, failureReason, supportId 
       </p>
 
       <section className="mt-5 rounded-md border border-border bg-surface-sunken p-4" id="authorization-trust">
-        <h2 className="text-sm font-semibold text-text">Güvenli ve salt okunur bağlantı</h2>
+        <h2 className="text-sm font-semibold text-text">Onaysız hiçbir şey değişmez</h2>
         <ul className="mt-2 space-y-1 text-sm leading-6 text-text-muted">
-          <li>Yalnızca ürün ve stok bilgilerini okur.</li>
-          <li>Ürün veya stok bilgileri değiştirilmez.</li>
+          <li>Ürün ve stok bilgilerini okur; tarama hiçbir şeyi değiştirmez.</li>
+          <li>Bir düzeltme yalnızca sen önizleyip onayladığında yazılır.</li>
+          <li>Sipariş, müşteri ve ödeme verilerine hiç dokunulmaz.</li>
           <li>Bağlantıdan sonra ilk sağlık raporun açılır.</li>
         </ul>
       </section>
