@@ -141,8 +141,12 @@ say so rather than dropping the sentence:
 - Every write is checked against a whole-product snapshot afterwards, so a write that touched
   anything it was not asked to touch is detected rather than assumed away.
 
-Until the listing text is corrected, the store page promises something the deployed app no longer
-does. This is a listing edit, not a code change, and it belongs to Emre.
+The same over-promise was live inside the app, on five screens including the box directly above the
+authorize button. That was code, and it is fixed and deployed — `/authorize-store` now reads
+"Onaysız hiçbir şey değişmez" in production.
+
+What remains is the store listing itself, which is a Partner-panel edit and belongs to Emre. Until
+it is corrected, the store page promises something the deployed app no longer does.
 
 ## Open gates before the first paying merchant
 
