@@ -5,6 +5,8 @@ import {
 import type { Entitlement } from "./entitlement-service";
 import { IkasAuthenticationError } from "@/lib/ikas/errors";
 import type { InstallationIdentity } from "@/lib/ikas/installation-auth";
+import { ISSUE_TO_RULE } from "@/lib/ikas/health-rules";
+import type { HealthIssue } from "@/lib/ikas/types";
 import { diffHealthIssues } from "@/lib/scans/issue-diff";
 import {
   listSnapshotHistory,
@@ -82,9 +84,24 @@ export async function getProductHealthHistory(
     { historyEnabled: true },
   );
 
+  /**
+   * The comparison counts only issues the merchant can actually find.
+   *
+   * A stored report keeps every detection, including the codes that reach no rule card. Comparing
+   * the raw sets made the history screen contradict itself in plain arithmetic — "Devam eden 289"
+   * sitting above "Toplam sorun: 257", because the total counts what a merchant can see while the
+   * diff counted everything. A number nobody can trace to a row is worse than no number, and two
+   * numbers on one card that cannot both be true is worse still.
+   */
+  const visibleIssues = (issues: HealthIssue[]) =>
+    issues.filter((issue) => ISSUE_TO_RULE[issue.code] !== undefined);
+
   const entries = snapshots.map((snapshot, index): ProductHealthHistoryEntry => {
     const previous = snapshots[index + 1];
-    const changes = diffHealthIssues(previous?.report.issues, snapshot.report.issues);
+    const changes = diffHealthIssues(
+      previous ? visibleIssues(previous.report.issues) : undefined,
+      visibleIssues(snapshot.report.issues),
+    );
     const safe = toSafeSnapshot(snapshot);
 
     return {

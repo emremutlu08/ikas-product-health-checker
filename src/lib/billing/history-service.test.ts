@@ -3,6 +3,7 @@ import { IkasAuthenticationError } from "@/lib/ikas/errors";
 import type { HealthIssue, HealthReport } from "@/lib/ikas/types";
 import type { ScanSnapshot } from "@/lib/scans/snapshot-store";
 import type { Entitlement } from "./entitlement-service";
+import { ISSUE_TO_RULE } from "@/lib/ikas/health-rules";
 import {
   HistoryAccessError,
   getProductHealthHistory,
@@ -31,7 +32,8 @@ function report(generatedAt: string, issues: HealthIssue[]): HealthReport {
     score: 50,
     productCount: Math.max(issues.length, 1),
     variantCount: 0,
-    issueCount: issues.length,
+    // Mirrors production: the merchant-facing count excludes codes that reach no rule card.
+    issueCount: issues.filter((issue) => ISSUE_TO_RULE[issue.code] !== undefined).length,
     affectedProductCount: new Set(issues.map((issue) => issue.productId)).size,
     scanStatus: "success",
     issueCountsByCode: {
@@ -178,5 +180,50 @@ describe("getProductHealthHistory", () => {
       code: "IKAS_PRO_FEATURE_REQUIRED",
       message: "IKAS_PRO_FEATURE_REQUIRED",
     });
+  });
+});
+
+/**
+ * The history card shows a total and a change breakdown side by side. They are two views of the
+ * same scan, so they have to reconcile — and they did not: the total counted only issues that
+ * reach a rule card while the diff compared every stored detection, which put "Devam eden 289"
+ * directly above "Toplam sorun: 257" on a real merchant's screen.
+ */
+describe("history arithmetic", () => {
+  it("keeps the change breakdown reconciled with the issue count it sits beside", async () => {
+    const invisible = healthIssue("product-9", "missing_vendor");
+    const first = snapshot("scan-1", "2026-08-04T10:00:00.000Z", [
+      healthIssue("product-1", "missing_sku"),
+      invisible,
+    ]);
+    const second = snapshot("scan-2", "2026-08-05T10:00:00.000Z", [
+      healthIssue("product-1", "missing_sku"),
+      healthIssue("product-2", "missing_image"),
+      invisible,
+    ]);
+
+    const history = await getProductHealthHistory(installation, dependencies(activePro, [second, first]));
+
+    for (const entry of history.entries) {
+      if (entry.changes.baseline === "missing") continue;
+      expect(entry.changes.added + entry.changes.ongoing).toBe(entry.issueCount);
+    }
+  });
+
+  it("never counts an issue the merchant cannot find on any rule card", async () => {
+    const onlyInvisible = snapshot("scan-1", "2026-08-04T10:00:00.000Z", [
+      healthIssue("product-1", "missing_vendor"),
+      healthIssue("product-2", "missing_brand"),
+    ]);
+    const next = snapshot("scan-2", "2026-08-05T10:00:00.000Z", [
+      healthIssue("product-1", "missing_vendor"),
+      healthIssue("product-2", "missing_brand"),
+    ]);
+
+    const history = await getProductHealthHistory(installation, dependencies(activePro, [next, onlyInvisible]));
+    const latest = history.entries[0]!;
+
+    expect(latest.issueCount).toBe(0);
+    expect(latest.changes).toMatchObject({ added: 0, ongoing: 0, resolved: 0 });
   });
 });
