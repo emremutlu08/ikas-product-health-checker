@@ -7,13 +7,15 @@ test("shows installation-required UI and opens the store authorization form", as
 
   expect(response?.status()).toBe(200);
   await expect(page.getByRole("heading", { name: "Kurulumu tamamla" })).toBeVisible();
-  await expect(page.getByText("Ürün veya stok bilgileri değiştirilmez", { exact: false })).toBeVisible();
+  await expect(page.getByText("Onaysız hiçbir şey değişmez", { exact: false })).toBeVisible();
   await expect(page.getByRole("link")).toHaveCount(1);
 
   await page.getByRole("link", { name: "ikas ile güvenli şekilde bağlan" }).click();
   await expect(page).toHaveURL(/\/authorize-store$/);
   await expect(page.getByRole("heading", { name: "Mağazanı bağla" })).toBeVisible();
-  await expect(page.getByText("Yalnızca ürün ve stok bilgilerini okur.")).toBeVisible();
+  await expect(
+    page.getByText("Bir düzeltme yalnızca sen önizleyip onayladığında yazılır."),
+  ).toBeVisible();
   // The semantic canvas token, not a raw palette step. Asserted as a resolved colour rather
   // than a class name so it survives a rename of the utility and still fails if the token stops
   // resolving. --color-canvas is #f6f7f9.
