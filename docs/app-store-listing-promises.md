@@ -45,9 +45,9 @@ promised behaviour has been seen to happen, and the two are recorded separately 
 | --- | --- | --- |
 | Günde bir kez otomatik tarama | Open | **Yes** — see below. |
 | Tarama geçmişi ve sorun farkları | Open | **Half.** The history surface renders and holds the retained scheduled scan (`04.08.2026 10:00`, 31 products). It holds exactly one entry, so the *diff* half of the promise cannot be shown until a second scan lands. |
-| Düşük stok eşiği ayarı | Open | **Configured, unproven.** A threshold of 5 is saved on `dev-emre4` under Pro. Whether a scan honours it is only visible in the next scheduled run. |
-| Günlük e-posta özeti | Open | **Configured, unproven.** `mail.designdevjourney.com` is verified in Resend, the recipient allowlist names both installations, and the merchant toggle is on. No summary has been sent yet — the last run reported `emailSkipped: 2`, before any of this was in place. Closes on `sent: 1`. |
-| Düşük stok ve toparlanma bildirimleri | Open | **Configured, unproven.** Same transport, now ready. Needs a scan where a variant actually crosses the threshold. |
+| Düşük stok eşiği ayarı | Open | **Yes.** A threshold of 5 was saved on `dev-emre4`, and the scheduled scan produced a low-stock notification — which only fires when a variant crosses the configured threshold. A threshold of 0 disables the rule entirely, so the alert existing is the proof it was applied. |
+| Günlük e-posta özeti | Open | **Yes.** `Ürün Sağlığı günlük özeti` reached the merchant, `Delivered` in Resend. |
+| Düşük stok ve toparlanma bildirimleri | Open | **Yes.** `Ürün Sağlığı stok bildirimi — dev-emre4` reached the merchant, `Delivered` in Resend. |
 
 ### The scheduled scan, proven — 2026-08-04
 
@@ -83,6 +83,25 @@ Every link in the chain is now in place and each was verified separately rather 
 None of that is evidence that a merchant receives anything. The last scheduled run reported
 `emailSkipped: 2`, taken before this configuration existed. The promise closes when a run reports
 `sent: 1`, and not before.
+
+### Email, delivered — 2026-08-06
+
+Resend's own sending log, which is independent of anything this repository writes, shows two
+messages to the merchant, both `Delivered`:
+
+- `Ürün Sağlığı günlük özeti`
+- `Ürün Sağlığı stok bildirimi — dev-emre4`
+
+That closes three promises at once, and the third is worth spelling out: a low-stock notification
+is only produced when a variant crosses the threshold the merchant configured, and a threshold of
+`0` disables the rule. The alert existing is therefore the evidence that the saved threshold of 5
+was read and applied by the scheduled scan — not merely stored.
+
+The evidence deliberately comes from Resend rather than from our own cron summary. Our log retains
+about four hours, so a daily job's own record of itself is gone by the time anyone looks; and a
+number this repository prints about its own behaviour is weaker evidence than the delivery record
+of the system that actually sent the mail. That distinction is the one that cost credibility
+earlier in this project.
 
 ### What the plan screen may and may not claim — 2026-08-03
 
