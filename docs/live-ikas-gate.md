@@ -125,6 +125,13 @@ Neither flag may be opened until a reversible `dev-emre2` canary has proved, wit
 before/after/rollback, that a single-variant `updateProduct` leaves every other variant and every
 omitted field unchanged.
 
+Both flags have now earned that, and each by its own run — the single canary does not license bulk:
+
+| Flag | Earned by | Opened |
+| --- | --- | --- |
+| `IKAS_PRODUCT_WRITES_ENABLED` | Multi-variant canary, 2026-08-05 | 2026-08-06 |
+| `IKAS_PRODUCT_BULK_WRITES_ENABLED` | Bulk canary, 2026-08-07 | 2026-08-07 |
+
 ### Multi-variant canary — passed 2026-08-05
 
 Target: `dev-emre2`, `Premium Shorts` (`f4081e72-…`), **24 variants**, one variant
@@ -142,6 +149,35 @@ then restored `CANARY-BASE-1` and compared again.
 
 This is what the single-variant canary could not show. `updateProduct` carrying one variant leaves
 sibling variants alone, on a real 24-variant product, and the change is reversible.
+
+### Bulk canary — passed 2026-08-07
+
+Target: `dev-emre2`, `Premium Shorts` (24 variants), three variants written in **one batch**.
+
+Bulk carries a risk the single-item canary cannot show. A batch sends several items in one call and
+the response maps errors back by array index, so a mis-alignment there would land one item's value
+on another item's variant: every item reports "applied", the totals agree, and the catalog is
+quietly wrong. Stock was the field under test because it is the one correctable field that restores
+exactly — an SKU batch could not be rolled back, since a SKU cannot be written back to empty.
+
+All three variants started at `100`, so the only thing distinguishing them was which offset landed
+where:
+
+| Variant | Written | Read back | Restored |
+| --- | --- | --- | --- |
+| `3fc514c9…` | 111 | 111 | 100 |
+| `a23149a3…` | 112 | 112 | 100 |
+| `0e5b0e02…` | 113 | 113 | 100 |
+
+- `changedByWrite: []` — nothing else on the 24-variant product moved.
+- `changedOverall: []` — after rollback the product was byte-for-byte where it started.
+- Confirmed independently of the test: all 24 variants read `100` afterwards.
+
+One correction to method, worth recording: `saveVariantStocks` does **not** bump the product's
+`updatedAt` — it writes stock records, not the product. The single-item canary used that timestamp
+as its "a real write reached ikas" signal, and that signal does not exist here. The evidence instead
+is the read-back itself: a separate query returning 111/112/113 is ikas reporting the values, not
+the test asserting its own belief.
 
 ### Earlier canary status — 2026-07-28
 

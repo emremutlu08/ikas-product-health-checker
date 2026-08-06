@@ -122,9 +122,27 @@ is not built, and until it is, the screen must not imply otherwise.
 
 | Claim | Status | Evidence |
 | --- | --- | --- |
-| "Ürün, stok ve fiyat bilgilerinizi değiştirmez" | Kept | `IKAS_PRODUCT_WRITES_ENABLED` and `IKAS_PRODUCT_BULK_WRITES_ENABLED` are both absent in production, and every correction path is closed when they are |
+| "Ürün, stok ve fiyat bilgilerinizi değiştirmez" | **No longer kept — listing text must change** | Both write flags are now open in production (`2026-08-06`, `2026-08-07`). See below. |
 | "Ürün kataloğunuz e-postayla paylaşılmaz" | Kept | The daily summary body carries only score, state, counts and a `/history` link; no product name or identifier is ever included |
 | "Düzeltme… geri alma imkânı sunar" | Kept, with a stated limit | A correction that filled a blank SKU is explicitly **not** offered as undoable, because writing a SKU back to empty has no proven inverse |
+
+### The safety sentence is now false — 2026-08-07
+
+The listing submitted for review says the app does not change product, stock or price information.
+That was true while both write flags were closed. It is not true any more: single writes opened on
+2026-08-06 and bulk on 2026-08-07, each after its own recorded canary.
+
+What the app actually does is narrower than "changes your data", and the replacement wording has to
+say so rather than dropping the sentence:
+
+- Nothing is written without the merchant pressing confirm on a preview of that exact change.
+- Only three fields are writable — SKU, price and stock. No payment, order or customer mutation of
+  any kind exists in the codebase.
+- Every write is checked against a whole-product snapshot afterwards, so a write that touched
+  anything it was not asked to touch is detected rather than assumed away.
+
+Until the listing text is corrected, the store page promises something the deployed app no longer
+does. This is a listing edit, not a code change, and it belongs to Emre.
 
 ## Open gates before the first paying merchant
 
