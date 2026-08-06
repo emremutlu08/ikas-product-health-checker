@@ -23,8 +23,16 @@ export const APP_NAV_ITEMS = [
 
 export type AppNavHref = (typeof APP_NAV_ITEMS)[number]["href"];
 
+/**
+ * Font weight is part of the shared base, not the active state.
+ *
+ * Marking the current tab bold changed its text width, so the menu visibly reflowed from page to
+ * page — the widest label happened to be the dashboard's, which made it look like a different
+ * control. The current page is carried by colour, border and fill instead, none of which change
+ * how much room a label takes.
+ */
 const BASE =
-  "inline-flex min-h-11 items-center rounded-md px-4 text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+  "inline-flex min-h-11 items-center rounded-md border px-4 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
 export function AppNav({ current }: { current: AppNavHref }) {
   return (
@@ -36,8 +44,8 @@ export function AppNav({ current }: { current: AppNavHref }) {
           <Link
             className={
               active
-                ? `${BASE} border border-accent bg-accent-soft font-semibold text-accent`
-                : `${BASE} border border-border-strong bg-surface font-medium text-text hover:bg-surface-sunken`
+                ? `${BASE} border-accent bg-accent-soft text-accent`
+                : `${BASE} border-border-strong bg-surface text-text hover:bg-surface-sunken`
             }
             href={item.href}
             key={item.href}

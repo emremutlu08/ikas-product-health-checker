@@ -219,11 +219,12 @@ export default async function SettingsPage({
     <main className="min-h-screen bg-canvas text-text">
       <IkasAppBridgeReady />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <header className="flex flex-col gap-4 border-b border-border pb-5">
           <div>
             <h1 className="text-title font-semibold tracking-tight">İzleme Ayarları</h1>
             <p className="mt-1 text-sm text-text-muted">Plan: Pro</p>
           </div>
+
           <AppNav current="/settings" />
         </header>
 

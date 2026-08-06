@@ -39,7 +39,21 @@ describe("AppNav", () => {
 
     const current = html.slice(html.indexOf('href="/settings"') - 400, html.indexOf('href="/settings"'));
     expect(current).toContain("border-accent");
-    expect(current).toContain("font-semibold");
+    expect(current).toContain("text-accent");
+  });
+
+  /**
+   * Weight is shared, never part of the active state: bold text is wider text, so marking the
+   * current tab that way made the menu reflow between pages and the widest label read as a
+   * different kind of control.
+   */
+  it("gives every tab the same text weight, so the menu never reflows", () => {
+    for (const item of APP_NAV_ITEMS) {
+      const html = renderToStaticMarkup(<AppNav current={item.href} />);
+
+      expect(html, item.href).not.toContain("font-semibold");
+      expect(html.match(/font-medium/g), item.href).toHaveLength(APP_NAV_ITEMS.length);
+    }
   });
 
   it("never marks a page the merchant is not on", () => {
