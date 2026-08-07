@@ -92,6 +92,13 @@ export default async function CorrectionsPage({
   const capability = matrix.capabilities.find(
     (row) => row.feature === "product-corrections-write",
   )!;
+  /**
+   * Bulk is a separate grant and a separate flag, so it is resolved separately. The panel is told
+   * only the answer, never the inputs — a client component that could see the flags would be a
+   * second place for them to be interpreted, and the server route is the one that decides.
+   */
+  const bulkEnabled =
+    matrix.capabilities.find((row) => row.feature === "bulk-corrections-write")?.usableNow === true;
 
   if (!capability.usableNow) {
     const description = !capability.includedInPlan
@@ -181,6 +188,7 @@ export default async function CorrectionsPage({
         alanların değişmediği kontrol edilir.
       </p>
       <CorrectionPanel
+        bulkEnabled={bulkEnabled}
         query={query}
         selection={selection}
         targets={selection.targets}

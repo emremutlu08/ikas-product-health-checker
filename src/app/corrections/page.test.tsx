@@ -224,3 +224,51 @@ describe("corrections page", () => {
     expect(mocks.resolveInstallationEntitlement).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Bulk is a second gate on top of the single-write one, and the page is where the two are read.
+ * The panel is handed the answer, never the flags, so these pin that the answer is derived from
+ * the capability matrix rather than assumed from the fact that corrections are open at all.
+ */
+describe("corrections page bulk gate", () => {
+  async function bulkPropFor(signalOverrides: Record<string, boolean>) {
+    mocks.resolveRolloutSignals.mockReturnValue({
+      ...signals,
+      productWritesEnabled: true,
+      ...signalOverrides,
+    });
+    mocks.panelProps.length = 0;
+    await render();
+    return mocks.panelProps[0]!.bulkEnabled;
+  }
+
+  it("does not offer bulk while only the single-write flag is open", async () => {
+    expect(await bulkPropFor({ bulkWritesEnabled: false })).toBe(false);
+  });
+
+  it("offers bulk once both the grant and the operator flag are in place", async () => {
+    expect(await bulkPropFor({ bulkWritesEnabled: true })).toBe(true);
+  });
+
+  /**
+   * The flag alone must never be enough. An operator opening bulk in production does not entitle
+   * a store that is not on the plan, and the page has to refuse it here rather than let the API
+   * refuse it after the merchant has selected fifty rows.
+   */
+  it("refuses bulk to a store whose plan does not include it, flag or not", async () => {
+    mocks.resolveInstallationEntitlement.mockResolvedValue({ tier: "free", state: "active" });
+    mocks.resolveRolloutSignals.mockReturnValue({
+      ...signals,
+      productWritesEnabled: true,
+      bulkWritesEnabled: true,
+    });
+    mocks.panelProps.length = 0;
+
+    const html = await render();
+
+    // Stronger than a false prop: a store without the plan never reaches the panel at all, so
+    // there is no surface on which bulk could be offered.
+    expect(mocks.panelProps).toHaveLength(0);
+    expect(html).toContain("PRO paketine dahildir");
+  });
+});

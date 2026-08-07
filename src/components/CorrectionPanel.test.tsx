@@ -229,3 +229,76 @@ describe("CorrectionPanel after a verified fix", () => {
     expect(html.match(/>Önizle</g)).toHaveLength(2);
   });
 });
+
+/**
+ * The bulk surface is gated twice over — a Pro grant and an operator flag — and the server decides
+ * both. What the panel owes is that a control never appears unless that decision was yes, because
+ * a visible "Onayla ve 12 düzeltmeyi uygula" that the API answers with 403 is worse than no button
+ * at all: the merchant believes work is queued that will never happen.
+ */
+describe("CorrectionPanel bulk selection", () => {
+  function bulkPanel(targets: CorrectableTarget[], bulkEnabled: boolean) {
+    const selection = {
+      targets,
+      totalTargets: targets.length,
+      unfilteredTargets: targets.length,
+      page: 1,
+      pageCount: 1,
+      rangeStart: targets.length === 0 ? 0 : 1,
+      rangeEnd: targets.length,
+    };
+
+    return (
+      <CorrectionPanel
+        bulkEnabled={bulkEnabled}
+        query={{ search: "", page: 1 }}
+        selection={selection}
+        targets={targets}
+      />
+    );
+  }
+
+  it("offers no batch control at all when the server did not grant bulk", () => {
+    const html = renderToStaticMarkup(bulkPanel([target], false));
+
+    expect(html).not.toContain("Toplu düzeltme");
+    expect(html).not.toContain("Toplu işleme ekle");
+    expect(html).not.toContain('type="checkbox"');
+    // The single-correction flow is untouched by the gate.
+    expect(html).toContain("Önizle");
+  });
+
+  it("offers the batch control once bulk is granted", () => {
+    const html = renderToStaticMarkup(bulkPanel([target], true));
+
+    expect(html).toContain("Toplu önizleme oluştur");
+    expect(html).toContain("Toplu düzeltme");
+  });
+
+  /**
+   * A batch item with nothing proposed is not a correction, so the row cannot join one until it
+   * carries a value. Disabled rather than hidden, so the merchant can see the control and read why
+   * it is not available to them yet.
+   */
+  it("cannot select a row that carries no proposed value yet", () => {
+    const html = renderToStaticMarkup(bulkPanel([target], true));
+
+    expect(html).toContain("Toplu işleme eklemek için önce bir değer yazın");
+    expect(html).toContain("önce düzeltmek istediğiniz satırlara yeni değeri yazın");
+
+    // Both the row tick and the select-all are unusable while no row is selectable, and so is the
+    // button they feed — asserted on the rendered controls rather than on the copy beside them.
+    const checkboxes = html.match(/<input[^>]*type="checkbox"[^>]*\/>/g) ?? [];
+    expect(checkboxes).toHaveLength(2);
+    for (const checkbox of checkboxes) expect(checkbox).toContain('disabled=""');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Toplu önizleme oluştur</);
+  });
+
+  it("keeps the batch approval closed until a plan comes back from the server", () => {
+    const html = renderToStaticMarkup(bulkPanel([target], true));
+
+    expect(html).not.toContain('role="dialog"');
+    expect(html).not.toContain("düzeltmeyi uygula");
+    expect(html).not.toContain("Kaldığı yerden devam et");
+  });
+});

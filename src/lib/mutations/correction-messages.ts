@@ -92,3 +92,52 @@ export function correctionErrorMessage(code: unknown): string {
     ? CORRECTION_ERROR_MESSAGES[code]!
     : UNKNOWN_CORRECTION_MESSAGE;
 }
+
+/**
+ * Restated rather than imported from `bulk-batch-store`, which reaches Redis and must not be
+ * pulled into the browser bundle by a copy table. A test asserts the two stay equal.
+ */
+export const BULK_SELECTION_LIMIT = 50;
+
+/** Failures of the batch as a whole, which say nothing about any individual correction. */
+export const BULK_ERROR_MESSAGES: Record<string, string> = {
+  IKAS_BULK_WRITE_DISABLED:
+    "Toplu düzeltme şu anda kapalı. Kataloğunuzda hiçbir değişiklik yapılmadı.",
+  IKAS_BULK_FEATURE_REQUIRED:
+    "Toplu düzeltme PRO paketine dahildir ve aktif bir abonelik doğrulanmalıdır.",
+  IKAS_BULK_INVALID_REQUEST: "Seçiminiz geçerli değil. Sayfayı yenileyip yeniden deneyin.",
+  IKAS_BULK_TOO_MANY_ITEMS: `Tek seferde en fazla ${BULK_SELECTION_LIMIT} düzeltme seçebilirsiniz.`,
+  IKAS_BULK_DUPLICATE_TARGET: "Aynı varyant için aynı düzeltme birden fazla kez seçilmiş.",
+  IKAS_BULK_BATCH_MISSING: "Bu toplu işlem bulunamadı. Yeni bir önizleme oluşturun.",
+  IKAS_BULK_BATCH_EXPIRED:
+    "Onay süresi doldu ve hiçbir şey yazılmadı. Yeni bir önizleme oluşturun.",
+  IKAS_BULK_BATCH_REPLAY: "Bu toplu işlem zaten çalıştırıldı; ikinci kez çalıştırılmaz.",
+  IKAS_BULK_BATCH_CANCELLED: "Bu toplu işlem iptal edildi.",
+  IKAS_BULK_PLAN_MISMATCH:
+    "Onayladığınız liste değişmiş görünüyor. Hiçbir şey yazılmadı; yeniden önizleyin.",
+  IKAS_BULK_NO_READY_ITEMS:
+    "Seçtiğiniz düzeltmelerin hiçbiri şu anda uygulanabilir durumda değil.",
+};
+
+export const UNKNOWN_BULK_MESSAGE =
+  "Toplu işlemin sonucu doğrulanamadı. Ürünlerinizi kontrol edin; aynı işlemi tekrar çalıştırmayın.";
+
+export function bulkErrorMessage(code: unknown): string {
+  if (typeof code !== "string") return UNKNOWN_BULK_MESSAGE;
+  if (code in BULK_ERROR_MESSAGES) return BULK_ERROR_MESSAGES[code]!;
+  // A batch can also fail for the same reasons a single correction can, and those already have
+  // merchant-facing wording. Falling through keeps one vocabulary instead of two.
+  if (code in CORRECTION_ERROR_MESSAGES) return CORRECTION_ERROR_MESSAGES[code]!;
+  return UNKNOWN_BULK_MESSAGE;
+}
+
+/**
+ * Per-item reasons arrive as bare sanitized codes (`no_change`, `stale_guard_unavailable`, …)
+ * rather than the prefixed form the HTTP layer uses, because they are produced deep in the
+ * planning and execution services. They name the same conditions, so they resolve against the same
+ * table instead of a parallel one that would drift out of step with it.
+ */
+export function bulkItemReasonMessage(reason: unknown): string {
+  if (typeof reason !== "string" || reason === "") return UNKNOWN_CORRECTION_MESSAGE;
+  return correctionErrorMessage(`IKAS_CORRECTION_${reason.toUpperCase()}`);
+}
