@@ -90,3 +90,33 @@ option, and ikas does not let an installed store change plan
    entitlement.
 5. Every result recorded in [app-store-listing-promises.md](app-store-listing-promises.md) and in
    the tracking issue.
+
+---
+
+## 5. The listing sentence, before the app is public
+
+**Blocking. Nothing below matters if this one is skipped.**
+
+The listing submitted for review says the app does not change product, stock or price information.
+That stopped being true when the write flags opened, and ikas locks the publishing screen while an
+app is `İnceleniyor`, so it could not be corrected on the spot.
+
+What holds the risk today, checked in the Partner panel on 2026-08-10 rather than assumed: the app
+is restricted to four allowed stores — `dev-emremutlu`, `dev-emre2`, `dev-emre3`, `dev-emre4` — all
+Emre's own. No third party can install it, so no merchant is currently relying on that sentence.
+The exposure is the reviewer, and ikas has been told directly.
+
+**Where:** Partner Dashboard → the app → Yayınlama → Düzenlemeye Geç (enabled once the review ends)
+
+The wording to paste is in
+[app-store-listing-promises.md](app-store-listing-promises.md#the-safety-sentence-is-now-false--2026-08-07).
+
+**Do not open the app to stores beyond the four above until this is applied.** The alternative, if
+the listing cannot be corrected first, is to close `IKAS_PRODUCT_WRITES_ENABLED` and
+`IKAS_PRODUCT_BULK_WRITES_ENABLED` in Vercel Production, which makes the published sentence true
+again at the cost of the correction surface. Both flags are one command each and every piece of
+evidence behind them is recorded in [live-ikas-gate.md](live-ikas-gate.md), so reopening them later
+costs nothing but the redeploy.
+
+**Evidence that closes this step:** the store page reads the new wording, and a screenshot or the
+ikas reply saying so.
