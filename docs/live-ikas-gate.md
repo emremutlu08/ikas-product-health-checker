@@ -179,6 +179,36 @@ as its "a real write reached ikas" signal, and that signal does not exist here. 
 is the read-back itself: a separate query returning 111/112/113 is ikas reporting the values, not
 the test asserting its own belief.
 
+### Bulk correction, end to end in production — 2026-08-10
+
+The canaries proved the writer. This proves the surface a merchant actually uses: the deployed
+`/api/product-corrections/bulk` endpoint on production, against the live store, with a real sealed
+session.
+
+Three variants on **three different products**, all at stock `0`, planned and applied as one batch:
+
+| Product | Variant | Written | Read back from ikas | After undo |
+| --- | --- | --- | --- | --- |
+| Basic Shorts Black | `27933401…` | 7 | 7 | 0 |
+| Basic Shorts Saxe Blue | `7f0981d4…` | 8 | 8 | 0 |
+| Basic Shorts Tile | `d4498f22…` | 9 | 9 | 0 |
+
+- Plan returned `201` with all three `ready` and each preview naming its own product and `0 → n`.
+- Execute returned `200`, `status: completed`, `succeeded: 3`, nothing rejected, nothing unknown.
+- The sibling variants on those products read `100,100,100`, `100,100,99` and `0,0,0` both before
+  and after — the batch touched only what it was given.
+- Restored through the app's own undo, which produced `7 → 0`, `8 → 0`, `9 → 0` previews and
+  verified `0` on confirmation. So the reverse path is exercised too, not just asserted.
+
+Verified against the ikas Admin API directly, not against the app's own response, and stock was the
+field on purpose: it is the one correctable field with a proven inverse, so nothing permanent was
+left on the store.
+
+What this run does **not** cover: the button. The merchant-facing selection, plan panel and cancel
+were driven with real clicks earlier against a local build; the confirm click could not be, because
+the browser windows available here leave the page unhydrated and the form submits natively. The
+request the button makes is the request made here.
+
 ### Earlier canary status — 2026-07-28
 
 The recorded canary ran on a **single-variant** product, so the sibling-variant case it exists to

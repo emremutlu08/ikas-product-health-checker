@@ -139,7 +139,7 @@ is not built, and until it is, the screen must not imply otherwise.
 | --- | --- | --- |
 | "Ürün, stok ve fiyat bilgilerinizi değiştirmez" | **No longer kept — listing text must change** | Both write flags are now open in production (`2026-08-06`, `2026-08-07`). See below. |
 | "Ürün kataloğunuz e-postayla paylaşılmaz" | Kept | The daily summary body carries only score, state, counts and a `/history` link; no product name or identifier is ever included |
-| "Düzeltme… geri alma imkânı sunar" | Kept, with a stated limit | A correction that filled a blank SKU is explicitly **not** offered as undoable, because writing a SKU back to empty has no proven inverse |
+| "Düzeltme… geri alma imkânı sunar" | Kept, with a stated limit | Exercised in production on 2026-08-10: three bulk stock corrections were undone through the app's own undo (`7 → 0`, `8 → 0`, `9 → 0`, each verified). A correction that filled a blank SKU is still explicitly **not** offered as undoable, because writing a SKU back to empty has no proven inverse |
 
 ### The safety sentence is now false — 2026-08-07
 
