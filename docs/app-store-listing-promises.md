@@ -178,10 +178,17 @@ pages and offers no way to withdraw a submission. So the platform itself holds t
 until the review ends, and the only channel during it is the address the review notice gives,
 `dev@ikas.com`.
 
-That leaves two honest options, both Emre's:
+**Reported to ikas — 2026-08-10.** A message went to `dev@ikas.com` from Emre's account naming
+the app and its `client_id`, stating plainly that the safety sentence is now wrong, listing exactly
+what the app can and cannot write, noting that the publishing screen is locked during review, and
+asking whether ikas updates the text or the review should be closed so Emre can. Confirmed in the
+Sent folder.
 
-1. Apply the wording above the moment the review closes, before any merchant installs.
-2. Write to `dev@ikas.com` during the review and say the safety sentence is now wrong. A draft:
+What remains is the reply, and then applying the wording below — either by ikas or by Emre once the
+publishing screen unlocks. Until then the store page still carries a claim the app no longer meets,
+which is now a known and disclosed gap rather than a silent one.
+
+The message sent:
 
 > Merhaba, incelemedeki "Ürün Sağlığı Asistanı" uygulamasının mağaza açıklamasında "Ürün, stok ve
 > fiyat bilgilerinizi değiştirmez" cümlesi yer alıyor. Uygulamaya bu ifadeden sonra, tacirin
