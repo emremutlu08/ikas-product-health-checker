@@ -171,10 +171,28 @@ now reads inside the app, so the two cannot drift apart again:
 > Sipariş, müşteri ve ödeme verilerine hiç dokunulmaz. Her yazma işleminden sonra ürün ikas'tan
 > yeniden okunur ve hedeflenen alan dışında hiçbir şeyin değişmediği doğrulanır.
 
-One practical note for whoever applies it: the listing is only editable through "Düzenlemeye Geç"
-on the publishing screen, and the app is currently `İnceleniyor`. Whether entering edit mode
-withdraws the app from that review is not something this repository can answer, so the edit is
-worth making deliberately rather than in passing.
+**It cannot be applied yet.** The listing is only editable through "Düzenlemeye Geç" on the
+publishing screen, and while the app is `İnceleniyor` that button is rendered `disabled` — checked
+in the Partner panel on 2026-08-10, not assumed. The Aksiyonlar tab covers app actions on ikas
+pages and offers no way to withdraw a submission. So the platform itself holds the text frozen
+until the review ends, and the only channel during it is the address the review notice gives,
+`dev@ikas.com`.
+
+That leaves two honest options, both Emre's:
+
+1. Apply the wording above the moment the review closes, before any merchant installs.
+2. Write to `dev@ikas.com` during the review and say the safety sentence is now wrong. A draft:
+
+> Merhaba, incelemedeki "Ürün Sağlığı Asistanı" uygulamasının mağaza açıklamasında "Ürün, stok ve
+> fiyat bilgilerinizi değiştirmez" cümlesi yer alıyor. Uygulamaya bu ifadeden sonra, tacirin
+> önizleyip açıkça onayladığı tekil ve toplu düzeltme yeteneği eklendi; yalnızca SKU, satış fiyatı
+> ve stok adedi yazılabiliyor, sipariş/müşteri/ödeme verilerine hiç dokunulmuyor. Cümle bu hâliyle
+> yanlış olduğu için düzeltmek istiyorum, ancak inceleme sürerken yayınlama ekranı düzenlemeye
+> kapalı. Metni şimdi mi güncelleyelim, inceleme sonrasında mı ilerleyelim?
+
+Option 2 is the safer one if the review might conclude before anyone remembers option 1: a listing
+that promises the app never writes is exactly the kind of thing a reviewer is entitled to fail, and
+finding it from us rather than from them is the cheaper order.
 
 ## Open gates before the first paying merchant
 
