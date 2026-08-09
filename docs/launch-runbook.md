@@ -111,12 +111,12 @@ The exposure is the reviewer, and ikas has been told directly.
 The wording to paste is in
 [app-store-listing-promises.md](app-store-listing-promises.md#the-safety-sentence-is-now-false--2026-08-07).
 
-**Do not open the app to stores beyond the four above until this is applied.** The alternative, if
-the listing cannot be corrected first, is to close `IKAS_PRODUCT_WRITES_ENABLED` and
-`IKAS_PRODUCT_BULK_WRITES_ENABLED` in Vercel Production, which makes the published sentence true
-again at the cost of the correction surface. Both flags are one command each and every piece of
-evidence behind them is recorded in [live-ikas-gate.md](live-ikas-gate.md), so reopening them later
-costs nothing but the redeploy.
+**This was taken on 2026-08-10.** Rather than leave a published sentence the app contradicts,
+both flags were removed from Vercel Production, so the app genuinely does not write and the listing
+is accurate again. The order is therefore fixed: correct the listing wording first, then reopen
+`IKAS_PRODUCT_WRITES_ENABLED` and `IKAS_PRODUCT_BULK_WRITES_ENABLED` — one command each plus a
+redeploy — never the other way round. Every piece of evidence behind the write surface is recorded
+in [live-ikas-gate.md](live-ikas-gate.md), so nothing has to be re-proved.
 
 **Evidence that closes this step:** the store page reads the new wording, and a screenshot or the
 ikas reply saying so.

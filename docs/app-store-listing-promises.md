@@ -137,11 +137,31 @@ is not built, and until it is, the screen must not imply otherwise.
 
 | Claim | Status | Evidence |
 | --- | --- | --- |
-| "Ürün, stok ve fiyat bilgilerinizi değiştirmez" | **No longer kept — listing text must change** | Both write flags are now open in production (`2026-08-06`, `2026-08-07`). See below. |
+| "Ürün, stok ve fiyat bilgilerinizi değiştirmez" | Kept again as of 2026-08-10 | Both write flags were removed from Vercel Production and the deployment refuses every write path — `IKAS_CORRECTION_WRITE_DISABLED` and `IKAS_BULK_WRITE_DISABLED`, both `403`, checked against production. See below. |
 | "Ürün kataloğunuz e-postayla paylaşılmaz" | Kept | The daily summary body carries only score, state, counts and a `/history` link; no product name or identifier is ever included |
 | "Düzeltme… geri alma imkânı sunar" | Kept, with a stated limit | Exercised in production on 2026-08-10: three bulk stock corrections were undone through the app's own undo (`7 → 0`, `8 → 0`, `9 → 0`, each verified). A correction that filled a blank SKU is still explicitly **not** offered as undoable, because writing a SKU back to empty has no proven inverse |
 
-### The safety sentence is now false — 2026-08-07
+### The sentence was made true again by closing the flags — 2026-08-10
+
+ikas locks the publishing screen while an app is `İnceleniyor`, so the listing could not be
+corrected to match the app. That left two ways to end the mismatch, and only one of them was
+available today: change the app instead of the sentence.
+
+`IKAS_PRODUCT_WRITES_ENABLED` and `IKAS_PRODUCT_BULK_WRITES_ENABLED` were removed from Vercel
+Production and the app redeployed. Verified against the deployment rather than assumed:
+
+- `POST /api/product-corrections/preview` → `403 IKAS_CORRECTION_WRITE_DISABLED`
+- `POST /api/product-corrections/bulk` → `403 IKAS_BULK_WRITE_DISABLED`
+- The plan screen shows both correction capabilities as `Geliştirme mağazasıyla sınırlı` again.
+- Scanning, the score, the rule cards and CSV export are untouched — the read product is intact.
+
+So the published sentence is accurate again: the app really does not change product, stock or price
+information. Nothing was lost. Every piece of evidence behind the write surface stands recorded in
+[live-ikas-gate.md](live-ikas-gate.md), including the bulk run against the live store, so reopening
+both flags is one command each plus a redeploy — to be done once the listing carries the wording
+below, and not before.
+
+### The safety sentence as submitted — 2026-08-07
 
 The listing submitted for review says the app does not change product, stock or price information.
 That was true while both write flags were closed. It is not true any more: single writes opened on
