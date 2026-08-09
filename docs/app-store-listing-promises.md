@@ -160,8 +160,21 @@ The same over-promise was live inside the app, on five screens including the box
 authorize button. That was code, and it is fixed and deployed — `/authorize-store` now reads
 "Onaysız hiçbir şey değişmez" in production.
 
-What remains is the store listing itself, which is a Partner-panel edit and belongs to Emre. Until
-it is corrected, the store page promises something the deployed app no longer does.
+What remains is the store listing itself, a Partner-panel edit. The replacement text below says the
+same reassuring thing without the part that stopped being true, and mirrors the wording a merchant
+now reads inside the app, so the two cannot drift apart again:
+
+> **Güvenlik**
+>
+> Uygulama ürün ve stok bilgilerinizi okur; tarama hiçbir şeyi değiştirmez. Bir düzeltme yalnızca
+> siz önizleyip onayladığınızda yazılır ve yalnızca üç alanda: SKU, satış fiyatı ve stok adedi.
+> Sipariş, müşteri ve ödeme verilerine hiç dokunulmaz. Her yazma işleminden sonra ürün ikas'tan
+> yeniden okunur ve hedeflenen alan dışında hiçbir şeyin değişmediği doğrulanır.
+
+One practical note for whoever applies it: the listing is only editable through "Düzenlemeye Geç"
+on the publishing screen, and the app is currently `İnceleniyor`. Whether entering edit mode
+withdraws the app from that review is not something this repository can answer, so the edit is
+worth making deliberately rather than in passing.
 
 ## Open gates before the first paying merchant
 
