@@ -241,13 +241,25 @@ finding it from us rather than from them is the cheaper order.
 
 ## Open gates before the first paying merchant
 
-1. ~~**Sender domain.**~~ Closed 2026-08-05: `mail.designdevjourney.com` verified. What remains is
-   a run reporting `sent: 1`.
-2. ~~**A scheduled scan that actually runs, and the diff that follows it.**~~ Closed
-   2026-08-04 for the run (`scheduled: 2, completed: 2`) and 2026-08-09 for the comparison: seven
-   retained scans, every entry with a predecessor showing its added/ongoing/resolved breakdown.
-3. **The low-stock threshold, exercised.** Set a threshold on a Pro store and confirm the next scan
-   honours it.
-4. ~~**Multi-variant canary.**~~ Passed 2026-08-05 on a 24-variant product: writing one variant
-   left the other 23 untouched, and the rollback restored the product exactly. Recorded in
-   [live-ikas-gate.md](live-ikas-gate.md).
+Everything the product promises has now been observed working. One gate is left, and it is not code.
+
+1. **The listing wording.** The store page says the app changes nothing; it corrects SKU, price and
+   stock on explicit confirmation. Reported to `dev@ikas.com` on 2026-08-10 and locked for editing
+   until the review closes. The replacement text is above. **The app must not be opened to a fifth
+   store before this is applied** — see step 5 of [launch-runbook.md](launch-runbook.md).
+
+Closed, with the evidence recorded rather than asserted:
+
+- ~~**Sender domain and delivery.**~~ `mail.designdevjourney.com` verified 2026-08-05; two messages
+  `Delivered` in Resend's own log on 2026-08-06.
+- ~~**A scheduled scan, and the diff that follows it.**~~ `scheduled: 2, completed: 2` on
+  2026-08-04; seven retained scans with a reconciled added/ongoing/resolved breakdown on 2026-08-09.
+- ~~**The low-stock threshold, exercised.**~~ A threshold of 5 on `dev-emre4` produced a low-stock
+  notification from the scheduled scan, which only fires on a crossing — so the saved value was
+  read and applied, not merely stored.
+- ~~**Multi-variant canary.**~~ Passed 2026-08-05: one variant written on a 24-variant product left
+  the other 23 untouched and rolled back exactly.
+- ~~**Bulk, proven and shipped.**~~ Bulk canary 2026-08-07; the merchant-facing screen built and
+  its plan path driven with real clicks; a live bulk run on 2026-08-10 put three distinct values on
+  three variants across three products, verified from the ikas API, then undone through the app's
+  own undo. Recorded in [live-ikas-gate.md](live-ikas-gate.md).
