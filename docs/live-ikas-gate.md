@@ -129,14 +129,13 @@ Both flags have now earned that, and each by its own run — the single canary d
 
 | Flag | Earned by | Opened | Closed again |
 | --- | --- | --- | --- |
-| `IKAS_PRODUCT_WRITES_ENABLED` | Multi-variant canary, 2026-08-05 | 2026-08-06 | 2026-08-10 |
-| `IKAS_PRODUCT_BULK_WRITES_ENABLED` | Bulk canary, 2026-08-07 | 2026-08-07 | 2026-08-10 |
+| `IKAS_PRODUCT_WRITES_ENABLED` | Multi-variant canary, 2026-08-05 | 2026-08-06 | briefly, 2026-08-10 |
+| `IKAS_PRODUCT_BULK_WRITES_ENABLED` | Bulk canary, 2026-08-07 | 2026-08-07 | briefly, 2026-08-10 |
 
-Both were closed on 2026-08-10, and not because anything went wrong with them. The store listing
-still carried "Ürün, stok ve fiyat bilgilerinizi değiştirmez", ikas locks the listing for editing
-while an app is under review, and shipping a capability the published page disclaims is the wrong
-side of that mismatch to be on. The flags reopen once the listing is corrected — the evidence
-recorded below does not expire.
+Both were briefly closed on 2026-08-10 over the listing wording and reopened the same day. The
+mismatch is real but it is a copy defect, and the app is restricted to four allowed stores, so no
+merchant can read that sentence yet. Withdrawing a capability with two canaries and a verified live
+run behind it was the wrong response to it.
 
 ### Multi-variant canary — passed 2026-08-05
 

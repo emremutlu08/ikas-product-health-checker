@@ -137,11 +137,29 @@ is not built, and until it is, the screen must not imply otherwise.
 
 | Claim | Status | Evidence |
 | --- | --- | --- |
-| "Ürün, stok ve fiyat bilgilerinizi değiştirmez" | Kept again as of 2026-08-10 | Both write flags were removed from Vercel Production and the deployment refuses every write path — `IKAS_CORRECTION_WRITE_DISABLED` and `IKAS_BULK_WRITE_DISABLED`, both `403`, checked against production. See below. |
+| "Ürün, stok ve fiyat bilgilerinizi değiştirmez" | **Not kept — listing wording pending with ikas** | The app writes on explicit confirmation. Disclosed to ikas 2026-08-10; the listing is locked for editing during review. Only Emre's four allowed stores can install, so no merchant relies on it today. See below. |
 | "Ürün kataloğunuz e-postayla paylaşılmaz" | Kept | The daily summary body carries only score, state, counts and a `/history` link; no product name or identifier is ever included |
 | "Düzeltme… geri alma imkânı sunar" | Kept, with a stated limit | Exercised in production on 2026-08-10: three bulk stock corrections were undone through the app's own undo (`7 → 0`, `8 → 0`, `9 → 0`, each verified). A correction that filled a blank SKU is still explicitly **not** offered as undoable, because writing a SKU back to empty has no proven inverse |
 
-### The sentence was made true again by closing the flags — 2026-08-10
+### Closing the flags was the wrong trade — reverted 2026-08-10
+
+For a few minutes both write flags were removed from production so the published sentence would be
+literally true. That was over-cautious and it was reverted the same day.
+
+The reasoning that was wrong: it treated a copy defect as a reason to withdraw a working, proven
+capability. Nothing about the write surface was in doubt — it had a multi-variant canary, a bulk
+canary and a verified live run behind it. Meanwhile the listing reaches nobody: the app is
+restricted to four allowed stores, all Emre's own, so no merchant can install it and none is
+relying on the sentence. The real mitigation was already in place — ikas was told directly, before
+they finished reviewing.
+
+Both flags are open again and verified against the deployment: a bulk plan returns `201`, and the
+plan screen shows both correction capabilities as `Beta` rather than `Geliştirme mağazasıyla
+sınırlı`.
+
+What remains is the wording, and it is the listing that has to move, not the product.
+
+### The safety sentence as submitted — 2026-08-07
 
 ikas locks the publishing screen while an app is `İnceleniyor`, so the listing could not be
 corrected to match the app. That left two ways to end the mismatch, and only one of them was
