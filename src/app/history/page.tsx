@@ -9,6 +9,15 @@ import {
 import { SnapshotStoreError } from "@/lib/scans/snapshot-store";
 import { getSession, readInstallationSession } from "@/lib/session";
 
+/**
+ * Every other tenant-scoped page declares this; history was the one that did not, and it was
+ * served from cache. In production the store held seven scans, the newest from that morning, while
+ * this page showed a single entry from six days earlier saying there was nothing to compare
+ * against — so the one promise this screen exists to keep, that a merchant can see what changed
+ * between scans, was broken by a missing line.
+ */
+export const dynamic = "force-dynamic";
+
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
