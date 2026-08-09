@@ -10,11 +10,13 @@ import { SnapshotStoreError } from "@/lib/scans/snapshot-store";
 import { getSession, readInstallationSession } from "@/lib/session";
 
 /**
- * Every other tenant-scoped page declares this; history was the one that did not, and it was
- * served from cache. In production the store held seven scans, the newest from that morning, while
- * this page showed a single entry from six days earlier saying there was nothing to compare
- * against — so the one promise this screen exists to keep, that a merchant can see what changed
- * between scans, was broken by a missing line.
+ * Every other tenant-scoped page declares this and history did not, which left one page's caching
+ * behaviour resting on inference rather than on a stated rule. Reading the session already forces
+ * a dynamic render today, so this changes nothing observable — it removes the odd one out, and the
+ * test beside it turns "all five happen to do this" into something a sixth page has to do too.
+ *
+ * No production symptom prompted it. The history surface was checked directly afterwards and is
+ * correct: seven scans, newest first, with the diff on every entry that has a predecessor.
  */
 export const dynamic = "force-dynamic";
 

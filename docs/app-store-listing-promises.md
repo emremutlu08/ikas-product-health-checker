@@ -44,7 +44,7 @@ promised behaviour has been seen to happen, and the two are recorded separately 
 | Promise | Gate | Observed working |
 | --- | --- | --- |
 | Günde bir kez otomatik tarama | Open | **Yes** — see below. |
-| Tarama geçmişi ve sorun farkları | Open | **Half.** The history surface renders and holds the retained scheduled scan (`04.08.2026 10:00`, 31 products). It holds exactly one entry, so the *diff* half of the promise cannot be shown until a second scan lands. |
+| Tarama geçmişi ve sorun farkları | Open | **Yes.** Closed 2026-08-09 — see below. |
 | Düşük stok eşiği ayarı | Open | **Yes.** A threshold of 5 was saved on `dev-emre4`, and the scheduled scan produced a low-stock notification — which only fires when a variant crosses the configured threshold. A threshold of 0 disables the rule entirely, so the alert existing is the proof it was applied. |
 | Günlük e-posta özeti | Open | **Yes.** `Ürün Sağlığı günlük özeti` reached the merchant, `Delivered` in Resend. |
 | Düşük stok ve toparlanma bildirimleri | Open | **Yes.** `Ürün Sağlığı stok bildirimi — dev-emre4` reached the merchant, `Delivered` in Resend. |
@@ -67,6 +67,21 @@ A caution for the next person reading production logs here: `vercel logs` retain
 four hours. A daily job is invisible in that window for most of the day, and its absence from the
 log is not evidence that it did not run. Two hours were spent chasing an anomaly that was only a
 gap in retention.
+
+### The scan history and its diffs — closed 2026-08-09
+
+`dev-emre2` now holds seven retained scans, and the surface renders all of them newest first. The
+newest reads `Yeni sorun 0 · Devam eden 257 · Çözülen 0` beside `Toplam sorun: 257`, so the
+breakdown reconciles with the total it sits next to — the arithmetic corrected in `10b958d`. The
+oldest entry has no predecessor and says so rather than reporting a diff against nothing.
+
+Read directly from the production Redis list as well as from the screen, because the two are
+independent: the store holds seven entries with the same timestamps the page shows.
+
+One correction to how this was checked. A first pass concluded the page was stale and served from
+cache — the extraction tool had returned only the last `<article>` of seven, which happened to be
+the oldest. Counting the elements on the page showed all seven present and correct. The reading
+tool's output was mistaken for the page's content; the page was right the whole time.
 
 ### Email, end to end — configured 2026-08-05
 
@@ -152,9 +167,9 @@ it is corrected, the store page promises something the deployed app no longer do
 
 1. ~~**Sender domain.**~~ Closed 2026-08-05: `mail.designdevjourney.com` verified. What remains is
    a run reporting `sent: 1`.
-2. ~~**A scheduled scan that actually runs.**~~ Closed 2026-08-04: `scheduled: 2, completed: 2`.
-   History retains it and the surface renders it. What remains is the comparison: with one entry
-   there is nothing to diff against, so this closes on the second scheduled scan.
+2. ~~**A scheduled scan that actually runs, and the diff that follows it.**~~ Closed
+   2026-08-04 for the run (`scheduled: 2, completed: 2`) and 2026-08-09 for the comparison: seven
+   retained scans, every entry with a predecessor showing its added/ongoing/resolved breakdown.
 3. **The low-stock threshold, exercised.** Set a threshold on a Pro store and confirm the next scan
    honours it.
 4. ~~**Multi-variant canary.**~~ Passed 2026-08-05 on a 24-variant product: writing one variant

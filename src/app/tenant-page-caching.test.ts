@@ -5,14 +5,13 @@ import { describe, expect, it } from "vitest";
 /**
  * A page that renders one tenant's data must never be served from a cache.
  *
- * `/history` shipped without `export const dynamic = "force-dynamic"` while every other
- * tenant-scoped page had it, and the consequence was not subtle: production Redis held seven
- * scans, the newest from that morning, and the screen showed a single entry from six days earlier
- * with "Karşılaştırma için önceki tarama yok". The feature the page exists for — showing what
- * changed between scans — was silently dead, and nothing failed.
+ * Four of the five such pages said so explicitly and `/history` did not. Reading the session
+ * forces a dynamic render on its own, so the odd one out was not actually being cached — but the
+ * guarantee was resting on a side effect of how the page happens to be written, which is a thin
+ * thing to leave between a merchant and someone else's scan history.
  *
- * This is discovered rather than listed, so a page added later is covered the day it is written
- * instead of the day someone remembers to add it here.
+ * The subjects are discovered rather than listed, so a page added later is covered the day it is
+ * written instead of the day someone remembers to add it here.
  */
 
 const APP_DIR = path.join(process.cwd(), "src", "app");
