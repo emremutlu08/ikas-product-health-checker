@@ -210,6 +210,13 @@ now reads inside the app, so the two cannot drift apart again:
 > Sipariş, müşteri ve ödeme verilerine hiç dokunulmaz. Her yazma işleminden sonra ürün ikas'tan
 > yeniden okunur ve hedeflenen alan dışında hiçbir şeyin değişmediği doğrulanır.
 
+**One caveat on the evidence.** The offending sentence is recorded from the 2026-07-28 review of
+the text submitted for publication; the live listing has not been read since. The publishing screen
+renders the description only in edit mode, and the app-store preview it links to (`apps.ikas.com/
+tr/uygulama/<client_id>?preview=true`) does not load outside the panel's own frame. So the wording
+should be confirmed on screen when the panel unlocks, before assuming which sentence needs
+replacing.
+
 **It cannot be applied yet.** The listing is only editable through "Düzenlemeye Geç" on the
 publishing screen, and while the app is `İnceleniyor` that button is rendered `disabled` — checked
 in the Partner panel on 2026-08-10, not assumed. The Aksiyonlar tab covers app actions on ikas
