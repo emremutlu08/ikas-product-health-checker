@@ -1,6 +1,7 @@
 import type { VerifiedRecipient } from "./verified-recipient";
 
-const RESEND_ENDPOINT = "https://api.resend.com/emails";
+const sendEndpoint = (accountId: string) =>
+  `https://api.cloudflare.com/client/v4/accounts/${accountId}/email/sending/send`;
 const REQUEST_TIMEOUT_MS = 5_000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:/-]{1,256}$/;
@@ -47,7 +48,8 @@ function parseFrom(value: string | undefined) {
   const angle = from.match(/<([^<>]+)>$/);
   const address = (angle?.[1] ?? from).trim();
   if (!validEmail(address)) configurationError();
-  return from;
+  const name = angle ? from.slice(0, from.length - angle[0].length).trim().replace(/^"|"$/g, "") : "";
+  return name ? { address, name } : address;
 }
 
 function assertSummary(summary: DailyEmailSummary) {
@@ -89,10 +91,13 @@ function textFor(summary: DailyEmailSummary) {
 }
 
 function readEmailConfiguration(env: Environment) {
-  const apiKey = env.RESEND_API_KEY?.trim();
+  // Cloudflare Email Sending: an API token with Email Sending permission and the account it belongs to.
+  const apiKey = env.EMAIL_API_TOKEN?.trim();
   if (!apiKey || apiKey.length < 16 || apiKey.length > 512) configurationError();
+  const accountId = env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  if (!accountId || !/^[a-f0-9]{32}$/.test(accountId)) configurationError();
   const from = parseFrom(env.IKAS_EMAIL_FROM);
-  return { apiKey, from };
+  return { apiKey, accountId, from };
 }
 
 export function isDailySummaryEmailConfigured(env: Environment = process.env) {
@@ -125,7 +130,7 @@ export function createTransactionalEmailSender({
   env?: Environment;
   fetchImpl?: typeof fetch;
 } = {}): TransactionalEmailSender {
-  const { apiKey, from } = readEmailConfiguration(env);
+  const { apiKey, accountId, from } = readEmailConfiguration(env);
 
   return {
     async send(recipient, email, idempotencyKey) {
@@ -141,18 +146,19 @@ export function createTransactionalEmailSender({
       }
 
       try {
-        const response = await fetchImpl(RESEND_ENDPOINT, {
+        const response = await fetchImpl(sendEndpoint(accountId), {
           method: "POST",
           headers: {
             authorization: "Bearer " + apiKey,
             "content-type": "application/json",
-            "idempotency-key": idempotencyKey,
           },
+          // The API has no idempotency header; the durable delivery id travels as a message header.
           body: JSON.stringify({
             from,
             to: [recipient.email],
             subject: email.subject,
             text: email.text,
+            headers: { "X-Delivery-Key": idempotencyKey },
           }),
           cache: "no-store",
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

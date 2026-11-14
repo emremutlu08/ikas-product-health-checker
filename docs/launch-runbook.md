@@ -41,7 +41,7 @@ untouched. Only then may `IKAS_PRODUCT_WRITES_ENABLED` be opened.
 4. Return to Resend and press Verify. Propagation is usually minutes, occasionally an hour.
 5. Say "resend hazır" once it turns green.
 
-`RESEND_API_KEY` and `IKAS_EMAIL_FROM` are already set in Vercel Production. The domain is the last
+`EMAIL_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` and `IKAS_EMAIL_FROM` are already set in Vercel Production. The domain is the last
 missing piece: Resend rejects every send from an unverified domain.
 
 **Evidence that closes this:** a cron run reporting `sent: 1`. Configuration alone proves nothing —
