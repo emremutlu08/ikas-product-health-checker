@@ -1,0 +1,29 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # contabo runner: rebuilds the ikas-health container (https://ikas-health.emremutlu.tr) from this commit.
+    runs-on: [self-hosted, linux, x64, vps]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Replace the app source
+        run: |
+          rm -rf /opt/apps/ikas-health/src
+          mkdir -p /opt/apps/ikas-health/src
+          git archive HEAD | tar -x -C /opt/apps/ikas-health/src
+      - name: Build and restart
+        run: /opt/apps/deploy.sh ikas-health
+      - name: Check the live app
+        run: |
+          code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' https://ikas-health.emremutlu.tr/)
+          echo "$code"; [ "$code" = 200 ]
